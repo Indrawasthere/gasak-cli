@@ -1,0 +1,31 @@
+# Build
+dist/
+build/
+bin/
+
+# Logs
+*.log
+
+# Env
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Personal
+.crush/
+
+# Temporary
+tmp/
+temp/
+
+# Binary
+*.exe
+*.dll
+*.so
+*.dylib
