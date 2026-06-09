@@ -21,18 +21,30 @@ import (
 )
 
 const (
-	SpreadsheetID = "1A0ce374Dgw3pS4w05Yw9y1flJK5pZi6D-UUII6PG5VM"
-	SheetGID      = "463772829"
-	CacheTTL      = time.Hour
+    SpreadsheetID = "1A0ce374Dgw3pS4w05Yw9y1flJK5pZi6D-UUII6PG5VM"
+    SheetGID      = "463772829"
 
-	GLPIUrl = os.Getenv("GLPI_URL")
-	OutlineURL = os.Getenv("OUTLINE_URL")
-	OutlineAPIKey = os.Getenv("OUTLINE_API_KEY")
-
-	LinearAPIKey = os.Getenv("LINEAR_API_KEY")
+    AppVersion = "1.0.7"
 )
 
-const AppVersion = "1.0.7"
+var (
+    CacheTTL = time.Hour
+
+    GLPIUrl       string
+    OutlineURL    string
+    OutlineAPIKey string
+    LinearAPIKey  string
+)
+
+func init() {
+    _ = godotenv.Load()
+
+    GLPIUrl = os.Getenv("GLPI_URL")
+    OutlineURL = os.Getenv("OUTLINE_URL")
+    OutlineAPIKey = os.Getenv("OUTLINE_API_KEY")
+    LinearAPIKey = os.Getenv("LINEAR_API_KEY")
+}
+
 const UpdateURL = "http://10.70.0.110:9001/version.txt"
 const BinaryURL = "http://10.70.0.110:9001/gasak"
 
@@ -74,7 +86,6 @@ func logErr(msg string)  { fmt.Println(errStyle.Render("  ✘  " + msg)) }
 func logInfo(msg string) { fmt.Println(infoStyle.Render("  ℹ  " + msg)) }
 func logWarn(msg string) { fmt.Println(warnStyle.Render("  ⚠  " + msg)) }
 
-func init() { _ = godotenv.Load() }
 
 func getGreeting() string {
 	h := time.Now().Hour()
