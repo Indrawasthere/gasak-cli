@@ -149,7 +149,7 @@ GASAK didistribusikan secara internal melalui HTTP distribution server yang berj
 Jalankan command berikut di terminal untuk mengunduh dan memasang melalui installer script (dilengkapi dengan pre-flight check konektivitas ZeroTier):
 
 ```bash
-curl -fsSL http://10.70.0.110:9001/install.sh | bash
+curl -fsSL http://your-server/install.sh | bash
 
 ```
 
