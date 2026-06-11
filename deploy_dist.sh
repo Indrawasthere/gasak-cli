@@ -1,10 +1,6 @@
 #!/bin/bash
 
-# ─────────────────────────────────────────────────────────────
-# GASAK AUTO-DEPLOYER
-# Pipeline: compile → SCP semua aset → restart dist server
-# Jalanin dari laptop dev setiap abis update kode / skrip
-# ─────────────────────────────────────────────────────────────
+
 
 set -euo pipefail
 
@@ -17,6 +13,8 @@ SUPENG_USER="parkee"
 SUPENG_IP="10.70.0.110"
 SUPENG_DIR="/home/parkee/gasak-dist"
 SSH_KEY="$HOME/.ssh/id_rsa"
+
+ENV_FILE="$LOCAL_PROJECT_DIR/.env"   
 
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
@@ -41,14 +39,14 @@ echo -e "${CYAN}  Dist    : ${GREEN}${LOCAL_DIST_DIR}${RESET}"
 echo -e "${CYAN}  Target  : ${GREEN}${SUPENG_USER}@${SUPENG_IP}:${SUPENG_DIR}${RESET}"
 echo -e "${CYAN}────────────────────────────────────────────────────────────${RESET}"
 
-# Cek SSH key ada dulu sebelum mubazir compile
+
 if [ ! -f "$SSH_KEY" ]; then
     err "SSH key tidak ditemukan: ${SSH_KEY}"
     err "Generate dulu: ssh-keygen -t rsa -b 4096"
     exit 1
 fi
 
-# Cek koneksi ke server supeng via ZeroTier sebelum mulai compile
+
 info "Cek koneksi ke server supeng..."
 if ! ping -c 1 -W 3 "$SUPENG_IP" > /dev/null 2>&1; then
     err "Tidak bisa reach ${SUPENG_IP}. Pastikan ZeroTier aktif."
@@ -62,7 +60,7 @@ step "1/4" "Compile GASAK binary (linux/amd64)..."
 
 cd "$LOCAL_PROJECT_DIR"
 
-# Build ke temp file dulu, baru rename — hindari SCP partial binary
+
 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o ./gasak_linux .
 
 ok "Kompilasi selesai: $(du -sh ./gasak_linux | cut -f1)"
@@ -74,7 +72,7 @@ step "2/4" "Upload binary ke server supeng..."
 info "Uploading gasak binary..."
 scp -i "$SSH_KEY" -q ./gasak_linux "${SUPENG_USER}@${SUPENG_IP}:${SUPENG_DIR}/gasak"
 
-# Hapus temp binary, yang di server udah renamed jadi gasak
+
 rm -f ./gasak_linux
 ok "Binary gasak terupload"
 
@@ -82,9 +80,7 @@ ok "Binary gasak terupload"
 
 step "3/4" "Upload semua aset dari local dist dir..."
 
-# Daftar semua aset yang harus selalu ada di server supeng
-# Binary lain (datetime, socketserver, crush) diambil dari gasak-dist lokal
-# karena itu compiled terpisah, bukan dari main.go
+
 DIST_FILES=(
     "datetime"
     "socketserver"
@@ -92,7 +88,7 @@ DIST_FILES=(
     "install.sh"
     "serve.sh"
     "log_cleaner.py"
-    "deploy_parkee_gum.sh"
+    "deploy_parkee.py"
     "log_cleaner_gum.sh"
     "log_cleaner_enhanced.sh"
     "version.txt"
@@ -111,7 +107,7 @@ for f in "${DIST_FILES[@]}"; do
     fi
 done
 
-# server.properties — upload kalau ada, kalau gak ada biarkan serve.sh yang generate template
+
 if [ -f "${LOCAL_DIST_DIR}/server.properties" ]; then
     UPLOAD_LIST+=("${LOCAL_DIST_DIR}/server.properties")
     info "Queue: server.properties"
@@ -126,6 +122,16 @@ else
     err "Tidak ada file yang bisa diupload dari ${LOCAL_DIST_DIR}"
     exit 1
 fi
+
+# ========== TAMBAHAN: UPLOAD .env DARI PROJECT DIR ==========
+if [ -f "$ENV_FILE" ]; then
+    info "Upload .env dari project dir..."
+    scp -i "$SSH_KEY" -q "$ENV_FILE" "${SUPENG_USER}@${SUPENG_IP}:${SUPENG_DIR}/"
+    ok ".env terupload"
+else
+    echo -e "   ${YELLOW}WARNING: .env tidak ditemukan di ${LOCAL_PROJECT_DIR}${RESET}"
+fi
+# ============================================================
 
 if [ ${#MISSING_FILES[@]} -gt 0 ]; then
     echo -e "   ${YELLOW}Warning: File berikut tidak ada di local dist, dilewati:${RESET}"
@@ -151,8 +157,10 @@ chmod +x "\${DIST_DIR}/crush" 2>/dev/null || true
 chmod +x "\${DIST_DIR}/serve.sh" 2>/dev/null || true
 find "\${DIST_DIR}" -maxdepth 1 -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
 
+# Set permission buat .env biar aman (cuma gasak yg baca)
+chmod 600 "\${DIST_DIR}/.env" 2>/dev/null || true
+
 echo "   -> Kill proses serve lama..."
-# Pattern kill yang match sama proses python3 inline dari serve.sh
 pkill -f "python3 -.*${SUPENG_DIR}" 2>/dev/null || true
 pkill -f "serve.sh" 2>/dev/null || true
 sleep 1
@@ -161,7 +169,6 @@ echo "   -> Jalanin serve.sh baru di background..."
 cd "\${DIST_DIR}"
 nohup bash serve.sh > dist_server.log 2>&1 &
 
-# Kasih waktu python naik
 sleep 2
 
 echo "   -> Verifikasi proses server:"

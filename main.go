@@ -24,7 +24,7 @@ const (
     SpreadsheetID = "1A0ce374Dgw3pS4w05Yw9y1flJK5pZi6D-UUII6PG5VM"
     SheetGID      = "463772829"
 
-    AppVersion = "1.0.7"
+    AppVersion = "1.1.0"
 )
 
 var (
@@ -34,15 +34,31 @@ var (
     OutlineURL    string
     OutlineAPIKey string
     LinearAPIKey  string
+    SshPass	  string
 )
 
 func init() {
-    _ = godotenv.Load()
+    home, _ := os.UserHomeDir()
+    locations := []string{
+        ".env",
+        filepath.Join(home, "gasak-dist", ".env"),
+        filepath.Join(home, ".env"),
+    }
+    for _, loc := range locations {
+        if err := godotenv.Load(loc); err == nil {
+            break
+        }
+    }
 
     GLPIUrl = os.Getenv("GLPI_URL")
     OutlineURL = os.Getenv("OUTLINE_URL")
     OutlineAPIKey = os.Getenv("OUTLINE_API_KEY")
     LinearAPIKey = os.Getenv("LINEAR_API_KEY")
+    
+    SshPass = os.Getenv("PARKEE_SSH_PASS")
+    if SshPass == "" {
+        SshPass = "REMOVED_PASSWORD" 
+    }
 }
 
 const UpdateURL = "http://10.70.0.110:9001/version.txt"
@@ -51,7 +67,7 @@ const BinaryURL = "http://10.70.0.110:9001/gasak"
 var (
 	csvURL       = fmt.Sprintf("https://docs.google.com/spreadsheets/d/%s/export?format=csv&gid=%s", SpreadsheetID, SheetGID)
 	cacheFile    = filepath.Join(os.Getenv("HOME"), ".cache", "parkee", "master_loc.csv")
-	deployScript = filepath.Join(os.Getenv("HOME"), "Documents", "deploy_parkee_gum.sh")
+	deployScript = filepath.Join(os.Getenv("HOME"), "gasak-dist", "deploy_parkee.py")
 )
 
 var (
@@ -533,18 +549,19 @@ func runParkeeCloud() {
 }
 
 func runParkeeLauncher() {
-	if _, err := os.Stat(deployScript); os.IsNotExist(err) {
-		logErr("Script gaada nih men: " + deployScript)
-		logInfo("Pastiin deploy_parkee_gum.sh ada di ~/Documents/")
+	homeDir, _ := os.UserHomeDir()
+	scriptPath := filepath.Join(homeDir, "gasak-dist", "deploy_parkee.py")
+
+	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
+		logErr("Script gaada nih men: " + scriptPath)
+		logInfo("Senggol Fadlan biar dia pastiin deploy_parkee.py udah ada di ~/gasak-dist/")
 		return
 	}
 
-	logInfo("Gasak Tembak Agent (Bubblegum Edition)...")
+	logInfo("Gasak Tembak Agent")
 	fmt.Println()
 
-	dir := filepath.Dir(deployScript)
-	cmd := exec.Command("bash", filepath.Base(deployScript))
-	cmd.Dir = dir
+	cmd := exec.Command("python3", scriptPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
@@ -643,12 +660,9 @@ func executeSingleLocationMenu(selected *Location) {
 		case "ssh_to":
 			logInfo(fmt.Sprintf("SSH as support@%s ...", selected.IP))
 			fmt.Println()
-			sshPass := os.Getenv("PARKEE_SSH_PASS")
-			if sshPass == "" {
-			logErr("PARKEE_SSH_PASS belum diset di environment")
-				return
-			}
-			runInteractive("sshpass", "-p", sshPass, "ssh",
+			
+			// Langsung pakai SshPass global yang sudah di-load saat aplikasi start
+			runInteractive("sshpass", "-p", SshPass, "ssh",
 				"-o", "StrictHostKeyChecking=no",
 				"-o", "ConnectTimeout=5",
 				fmt.Sprintf("support@%s", selected.IP))
@@ -702,7 +716,7 @@ func runMassCheckSafe(locs []Location) {
 
 		fmt.Println(accentStyle.Render(fmt.Sprintf("=== %s ===", strings.ToUpper(target))))
 		if foundLoc == nil {
-			logErr(fmt.Sprintf("Unicode %s kagak ada di data Google Sheet!", target))
+			logErr(fmt.Sprintf("Unicode %s kagak ada di data Google Sheet", target))
 			fmt.Println()
 			continue
 		}
@@ -747,11 +761,7 @@ func fetchLiveVersionsInlineSafe(ip string) {
 	go checkAPI("FS", fmt.Sprintf("http://%s:8888/actuator/info", ip))
 
 	go func() {
-		sshPass := os.Getenv("PARKEE_SSH_PASS")
-		if sshPass == "" {
-			sshPass = "REMOVED_PASSWORD"
-		}
-		cmd := exec.Command("sshpass", "-p", sshPass,
+		cmd := exec.Command("sshpass", "-p", SshPass,
 			"ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=3",
 			"support@"+ip,
 			"unzip -p /mnt/shared/production/parkee-agent-production.jar META-INF/MANIFEST.MF 2>/dev/null | grep 'Implementation-Version' | cut -d: -f2 | tr -d ' \\r '",
@@ -1469,21 +1479,15 @@ func listRemoteDir(tpUser *TeleportUser, loc *Location, remoteDir string) ([]str
 	if tpUser.IsL2 {
 		nodeName := nodeNameFromUnicode(loc.Unicode)
 
-		// FIX TSH: Gabungkan seluruh perintah remote setelah host ke dalam satu string tunggal
-		// Teleport akan mempassing string ini langsung ke remote shell interpreter.
+
 		remoteUserHost := fmt.Sprintf("%s@%s", nodeName, nodeName)
 		remoteCommand := fmt.Sprintf("bash -c '%s'", lsCmd)
 
 		cmd := exec.Command("tsh", "ssh", remoteUserHost, remoteCommand)
 		out, err = cmd.Output()
 	} else {
-		sshPass := os.Getenv("PARKEE_SSH_PASS")
-		if sshPass == "" {
-			sshPass = "REMOVED_PASSWORD"
-		}
 
-		// FIX SSHPASS: Bungkus perintah lsCmd dengan aman ke dalam subshell bash remote
-		cmd := exec.Command("sshpass", "-p", sshPass,
+		cmd := exec.Command("sshpass", "-p", SshPass,
 			"ssh",
 			"-o", "StrictHostKeyChecking=no",
 			"-o", "ConnectTimeout=5",
@@ -1532,17 +1536,11 @@ func scpFile(tpUser *TeleportUser, loc *Location, remotePath string, filename st
 
 	if tpUser.IsL2 {
 		nodeName := nodeNameFromUnicode(loc.Unicode)
-		// Contoh output command: tsh scp server-0pv@server-0pv:/var/tmp/application/log.log ~/Downloads/logs/0PV/log.log
 		src := fmt.Sprintf("%s@%s:%s", nodeName, nodeName, remotePath)
 		cmd = exec.Command("tsh", "scp", src, destPath)
 	} else {
-		// Support / L1 menggunakan sshpass scp ke IP Target
-		sshPass := os.Getenv("PARKEE_SSH_PASS")
-		if sshPass == "" {
-			sshPass = "REMOVED_PASSWORD"
-		}
 		src := fmt.Sprintf("support@%s:%s", loc.IP, remotePath)
-		cmd = exec.Command("sshpass", "-p", sshPass,
+		cmd = exec.Command("sshpass", "-p", SshPass,
 			"scp",
 			"-o", "StrictHostKeyChecking=no",
 			"-o", "ConnectTimeout=15",
