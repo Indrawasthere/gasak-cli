@@ -21,44 +21,59 @@ import (
 )
 
 const (
-    SpreadsheetID = "1A0ce374Dgw3pS4w05Yw9y1flJK5pZi6D-UUII6PG5VM"
-    SheetGID      = "463772829"
+	SpreadsheetID = "1A0ce374Dgw3pS4w05Yw9y1flJK5pZi6D-UUII6PG5VM"
+	SheetGID      = "463772829"
 
-    AppVersion = "1.1.0"
+	AppVersion = "1.1.12"
 )
 
 var (
-    CacheTTL = time.Hour
+	CacheTTL = time.Hour
 
-    GLPIUrl       string
-    OutlineURL    string
-    OutlineAPIKey string
-    LinearAPIKey  string
-    SshPass	  string
+	GLPIUrl       string
+	OutlineURL    string
+	OutlineAPIKey string
+	LinearAPIKey  string
+	SshPass       string
+
+	CmsDbHost string
+	CmsDbPort string
+	CmsDbUser string
+	CmsDbPass string
+	CmsDbName string
 )
 
 func init() {
-    home, _ := os.UserHomeDir()
-    locations := []string{
-        ".env",
-        filepath.Join(home, "gasak-dist", ".env"),
-        filepath.Join(home, ".env"),
-    }
-    for _, loc := range locations {
-        if err := godotenv.Load(loc); err == nil {
-            break
-        }
-    }
+	home, _ := os.UserHomeDir()
+	locations := []string{
+		".env",
+		filepath.Join(home, "gasak-dist", ".env"),
+		filepath.Join(home, ".env"),
+	}
+	for _, loc := range locations {
+		if err := godotenv.Load(loc); err == nil {
+			break
+		}
+	}
 
-    GLPIUrl = os.Getenv("GLPI_URL")
-    OutlineURL = os.Getenv("OUTLINE_URL")
-    OutlineAPIKey = os.Getenv("OUTLINE_API_KEY")
-    LinearAPIKey = os.Getenv("LINEAR_API_KEY")
-    
-    SshPass = os.Getenv("PARKEE_SSH_PASS")
-    if SshPass == "" {
-        SshPass = "REMOVED_PASSWORD" 
-    }
+	GLPIUrl = os.Getenv("GLPI_URL")
+	OutlineURL = os.Getenv("OUTLINE_URL")
+	OutlineAPIKey = os.Getenv("OUTLINE_API_KEY")
+	LinearAPIKey = os.Getenv("LINEAR_API_KEY")
+
+	SshPass = os.Getenv("PARKEE_SSH_PASS")
+	if SshPass == "" {
+		SshPass = "REMOVED_PASSWORD"
+	}
+
+	CmsDbHost = os.Getenv("CMS_DB_HOST")
+	CmsDbPort = os.Getenv("CMS_DB_PORT")
+	CmsDbUser = os.Getenv("CMS_DB_USER")
+	CmsDbPass = os.Getenv("CMS_DB_PASS")
+	CmsDbName = os.Getenv("CMS_DB_NAME")
+	if CmsDbPort == "" {
+		CmsDbPort = "5432"
+	}
 }
 
 const UpdateURL = "http://10.70.0.110:9001/version.txt"
@@ -101,7 +116,6 @@ func logOK(msg string)   { fmt.Println(okStyle.Render("  ✔  " + msg)) }
 func logErr(msg string)  { fmt.Println(errStyle.Render("  ✘  " + msg)) }
 func logInfo(msg string) { fmt.Println(infoStyle.Render("  ℹ  " + msg)) }
 func logWarn(msg string) { fmt.Println(warnStyle.Render("  ⚠  " + msg)) }
-
 
 func getGreeting() string {
 	h := time.Now().Hour()
@@ -194,18 +208,19 @@ type LogSource struct {
 	Path         string
 	AllowedForL2 bool
 	IsDir        bool
+	IsAgentLog   bool
 }
 
 var logSources = []LogSource{
-	// --- SERVER LOGS ---
-	{Name: "[Server] Watersheep", Path: "/var/log/agent/watersheep", AllowedForL2: false, IsDir: true},
-	{Name: "[Server] Fisherman", Path: "/var/log/agentweebhook", AllowedForL2: false, IsDir: true},
-	{Name: "[Server] Syslog", Path: "/var/log/syslog", AllowedForL2: false, IsDir: false},
-	{Name: "[Server] PostgreSQL", Path: "/var/log/postgresql", AllowedForL2: true, IsDir: true},
+	// --- SERVER LOGS (ada di server main lokasi) ---
+	{Name: "[Server] Watersheep", Path: "/var/log/agent/watersheep", AllowedForL2: false, IsDir: true, IsAgentLog: false},
+	{Name: "[Server] Fisherman", Path: "/var/log/agentweebhook", AllowedForL2: false, IsDir: true, IsAgentLog: false},
+	{Name: "[Server] Syslog", Path: "/var/log/syslog", AllowedForL2: false, IsDir: false, IsAgentLog: false},
+	{Name: "[Server] PostgreSQL", Path: "/var/log/postgresql", AllowedForL2: true, IsDir: true, IsAgentLog: false},
 
-	// --- AGENT LOGS ---
-	{Name: "[Agent] Parkee Agent (Log Dir)", Path: "/var/log/agent/parkee-agent", AllowedForL2: false, IsDir: true},
-	{Name: "[Agent] Parkee Agent (Tmp App)", Path: "/var/tmp/application", AllowedForL2: false, IsDir: true},
+	// --- AGENT LOGS (ada di masing-masing gate PC) ---
+	{Name: "[Agent] Parkee Agent (/var/log/agent/parkee-agent)", Path: "/var/log/agent/parkee-agent", AllowedForL2: false, IsDir: true, IsAgentLog: true},
+	{Name: "[Agent] Parkee Agent (/var/tmp/application)", Path: "/var/tmp/application", AllowedForL2: false, IsDir: true, IsAgentLog: true},
 }
 
 func getTeleportUser() *TeleportUser {
@@ -422,6 +437,8 @@ func main() {
 			huh.NewOption("Location Lookup", "location_lookup"),
 			huh.NewOption("Potong Log", "log_range"),
 			huh.NewOption("Ambil Log", "fetch_log"),
+			huh.NewOption("Settlement RFS", "settlement_rfs"),
+			huh.NewOption("Settlement Decode", "settlement_decode"),
 		)
 
 		if tpUser.IsL2 {
@@ -482,6 +499,10 @@ func main() {
 			runLogCleaner()
 		case "fetch_log":
 			runFetchLog(tpUser)
+		case "settlement_rfs":
+			runSettlementRFS()
+		case "settlement_decode":
+			runSettlementDecode()
 		case "superfile":
 			runSuperfile()
 		case "crush_open":
@@ -505,12 +526,14 @@ func main() {
 
 func canAccess(tpUser *TeleportUser, action string) bool {
 	l1Allowed := map[string]bool{
-		"tsh_login":       true,
-		"parkee_launcher": true,
-		"location_lookup": true,
-		"log_range":       true,
-		"fetch_log":       true,
-		"exit":            true,
+		"tsh_login":         true,
+		"parkee_launcher":   true,
+		"location_lookup":   true,
+		"log_range":         true,
+		"fetch_log":         true,
+		"settlement_rfs":    true,
+		"settlement_decode": true,
+		"exit":              true,
 	}
 
 	if tpUser.IsL2 {
@@ -660,7 +683,7 @@ func executeSingleLocationMenu(selected *Location) {
 		case "ssh_to":
 			logInfo(fmt.Sprintf("SSH as support@%s ...", selected.IP))
 			fmt.Println()
-			
+
 			// Langsung pakai SshPass global yang sudah di-load saat aplikasi start
 			runInteractive("sshpass", "-p", SshPass, "ssh",
 				"-o", "StrictHostKeyChecking=no",
@@ -1278,11 +1301,11 @@ func runLogCleaner() {
 		return
 	}
 
-	scriptPath := filepath.Join(homeDir, ".local", "share", "gasak", "log_cleaner.py")
+	scriptPath := filepath.Join(homeDir, "gasak-dist", "log_cleaner.py")
 
 	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
-		logErr("File GUI log_cleaner.py tidak ditemukan di shared directory!")
-		fmt.Println(dimStyle.Render("Silakan jalankan ulang script install.sh rilis terbaru."))
+		logErr("File log_cleaner.py gaada nih men: " + scriptPath)
+		fmt.Println(dimStyle.Render("Jalanin ulang install.sh rilis terbaru."))
 		return
 	}
 
@@ -1409,8 +1432,11 @@ func runFetchLog(tpUser *TeleportUser) {
 
 	fmt.Println()
 
-	// Step 3: Eksekusi penarikan berdasarkan type data (Directory vs Single File)
-	if chosenSource.IsDir {
+	// Step 3: Eksekusi penarikan berdasarkan type data
+	if chosenSource.IsAgentLog {
+		// Log ada di gate PC — perlu flow 2-hop via server main
+		fetchAgentGateLog(tpUser, selected, chosenSource.Path, chosenSource.Name)
+	} else if chosenSource.IsDir {
 		fetchLogFromDir(tpUser, selected, chosenSource.Path, chosenSource.Name)
 	} else {
 		fetchSingleFile(tpUser, selected, chosenSource.Path, chosenSource.Name)
@@ -1469,8 +1495,6 @@ func fetchSingleFile(tpUser *TeleportUser, loc *Location, remotePath string, log
 }
 
 func listRemoteDir(tpUser *TeleportUser, loc *Location, remoteDir string) ([]string, error) {
-	// Pastikan kita bersihin string path, dan panggil bash untuk mengeksekusi cd + ls secara runtut
-	// Gunakan single quotes di sekeliling command agar wildcard atau space tidak patah di level lokal Go
 	lsCmd := fmt.Sprintf("cd %s && ls -1t 2>/dev/null | head -50", remoteDir)
 
 	var out []byte
@@ -1478,7 +1502,6 @@ func listRemoteDir(tpUser *TeleportUser, loc *Location, remoteDir string) ([]str
 
 	if tpUser.IsL2 {
 		nodeName := nodeNameFromUnicode(loc.Unicode)
-
 
 		remoteUserHost := fmt.Sprintf("%s@%s", nodeName, nodeName)
 		remoteCommand := fmt.Sprintf("bash -c '%s'", lsCmd)
@@ -1519,7 +1542,7 @@ func listRemoteDir(tpUser *TeleportUser, loc *Location, remoteDir string) ([]str
 }
 
 func scpFile(tpUser *TeleportUser, loc *Location, remotePath string, filename string) {
-	// Bikin local folder destination: ~/Downloads/logs/<UNICODE>
+	// Bikin local folder: ~/Downloads/logs/<UNICODE>
 	destDir := filepath.Join(os.Getenv("HOME"), "Downloads", "logs", strings.ToUpper(loc.Unicode))
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		logErr("Gagal membuat folder tujuan lokal: " + err.Error())
@@ -1559,4 +1582,407 @@ func scpFile(tpUser *TeleportUser, loc *Location, remotePath string, filename st
 
 	fmt.Println()
 	logOK(fmt.Sprintf("Mantap men! Log berhasil disimpen di: %s", destPath))
+}
+
+// ─── Gate PC Log Flow ─────────────────────────────────────────────────────────
+// Log agent ada di masing-masing gate PC (pm/pk), bukan di server main.
+// Flow: GASAK → SSH server main → query postgres → pilih gate →
+//       server main SCP dari gate ke /tmp/ → GASAK SCP dari server main ke laptop
+
+type GateInfo struct {
+	UserPC string
+	IP     string // IP LAN pertama dari kolom ip_address
+}
+
+// queryGatesFromDB SSH ke server main, query postgres, return list gate (yang aktif doang tapi)
+func queryGatesFromDB(tpUser *TeleportUser, loc *Location) ([]GateInfo, error) {
+	uni := strings.ToLower(loc.Unicode)
+
+	// Cloning query dari sshp: ambil user_pc + ip terbaru per gate (ranked by created_at DESC) tapi cuma ambil nama sama ip aja
+	// Filter yang sama buat location lookup, pake unique_code dari tabel location biar cuma gate lokasi ini yang keambil
+	// Enhanced: pake format Heredoc (<<'EOF') biar aman di-pass via SSH tanpa masalah quoting bash atau cuma ngintip value tanpa gather postgre session
+	query := fmt.Sprintf(`psql -h localhost -U agent -d agent_%s -t -A -F'|' <<'EOF'
+SELECT DISTINCT ON (user_pc) user_pc, ip_address
+FROM (
+    SELECT user_pc, ip_address, created_at
+    FROM core_user_activity
+    WHERE lower(user_pc) LIKE '%%' || (SELECT lower(unique_code) FROM location) || '%%'
+      AND deleted_at IS NULL
+      AND action_type = 'LOGIN'
+      AND created_at >= NOW() - INTERVAL '31 days'
+) AS get_data
+ORDER BY user_pc, created_at DESC;
+EOF`, uni)
+
+	var out []byte
+	var err error
+
+	if tpUser.IsL2 {
+		nodeName := nodeNameFromUnicode(loc.Unicode)
+		cmd := exec.Command("tsh", "ssh",
+			fmt.Sprintf("%s@%s", nodeName, nodeName),
+			query,
+		)
+		out, err = cmd.Output()
+	} else {
+		cmd := exec.Command("sshpass", "-p", SshPass,
+			"ssh",
+			"-o", "StrictHostKeyChecking=no",
+			"-o", "ConnectTimeout=5",
+			fmt.Sprintf("support@%s", loc.IP),
+			query,
+		)
+		out, err = cmd.Output()
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("Fetching data gate gagal nich: %w", err)
+	}
+
+	raw := strings.TrimSpace(string(out))
+	if raw == "" {
+		return nil, fmt.Errorf("ga ada data gate aktif di DB lokasi ini (31 hari terakhir)")
+	}
+
+	var gates []GateInfo
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		userPC := strings.TrimSpace(parts[0])
+		rawIP := strings.TrimSpace(parts[1])
+
+		selectedIP := ""
+		for _, token := range strings.Fields(rawIP) {
+			if strings.HasPrefix(token, "10.") {
+				selectedIP = token
+				break
+			}
+		}
+		if selectedIP == "" && len(strings.Fields(rawIP)) > 0 {
+			selectedIP = strings.Fields(rawIP)[0]
+		}
+
+		if userPC == "" || selectedIP == "" {
+			continue
+		}
+		gates = append(gates, GateInfo{UserPC: userPC, IP: selectedIP})
+	}
+
+	if len(gates) == 0 {
+		return nil, fmt.Errorf("Fetching data gate kosong men — ga ada gate login dalam 31 hari terakhir")
+	}
+
+	return gates, nil
+}
+
+// listGateLogFiles SSH dari server main ke gate PC, list file di remotePath
+func listGateLogFiles(tpUser *TeleportUser, loc *Location, gate GateInfo, remotePath string) ([]string, error) {
+	gatePass := fmt.Sprintf("pc%sclient", strings.ToLower(loc.Unicode))
+
+	// Command buat jalan di SERVER Main untuk list file di PC gate
+	lsCmd := fmt.Sprintf(
+		"sshpass -p '%s' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 %s@%s 'ls -1t %s 2>/dev/null | head -30'",
+		gatePass, gate.UserPC, gate.IP, remotePath,
+	)
+
+	var out []byte
+	var err error
+
+	if tpUser.IsL2 {
+		nodeName := nodeNameFromUnicode(loc.Unicode)
+		cmd := exec.Command("tsh", "ssh",
+			fmt.Sprintf("%s@%s", nodeName, nodeName),
+			lsCmd,
+		)
+		out, err = cmd.Output()
+	} else {
+		cmd := exec.Command("sshpass", "-p", SshPass,
+			"ssh",
+			"-o", "StrictHostKeyChecking=no",
+			"-o", "ConnectTimeout=5",
+			fmt.Sprintf("support@%s", loc.IP),
+			lsCmd,
+		)
+		out, err = cmd.Output()
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("gagal list file di gate: %w", err)
+	}
+
+	raw := strings.TrimSpace(string(out))
+	if raw == "" {
+		return nil, fmt.Errorf("direktori %s kosong di gate %s", remotePath, gate.UserPC)
+	}
+
+	var files []string
+	for _, l := range strings.Split(raw, "\n") {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			files = append(files, l)
+		}
+	}
+	return files, nil
+}
+
+// fetchAgentGateLog main buat orchestrator si pengambil log dari gate PC
+func fetchAgentGateLog(tpUser *TeleportUser, loc *Location, remotePath string, logLabel string) {
+	// Step 1: Query list gate dari postgres di server main
+	logInfo(fmt.Sprintf("List Gate di %s [%s]...", loc.Nama, loc.Unicode))
+	fmt.Println()
+
+	gates, err := queryGatesFromDB(tpUser, loc)
+	if err != nil {
+		logErr("Yah gagal fetch location gate nya men: " + err.Error())
+		logWarn("Infoin Fadlan kalo fetching nya error yak!")
+		return
+	}
+
+	logOK(fmt.Sprintf("%d gate ada nich.", len(gates)))
+	fmt.Println()
+
+	// Step 2: Pilih gate dari dropdown
+	var gateOpts []huh.Option[string]
+	for _, g := range gates {
+		label := fmt.Sprintf("%-25s | %s", g.UserPC, g.IP)
+		gateOpts = append(gateOpts, huh.NewOption(label, g.UserPC))
+	}
+
+	var selectedGateUser string
+	gateForm := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title(fmt.Sprintf("Pilih Gate untuk %s [%s]:", loc.Nama, loc.Unicode)).
+				Description(fmt.Sprintf("%d gate aktif (30 hari terakhir)", len(gates))).
+				Options(gateOpts...).
+				Value(&selectedGateUser).
+				Filtering(true),
+		),
+	).WithTheme(crushTheme())
+
+	if err := gateForm.Run(); err != nil {
+		logWarn("Dibatalin.")
+		return
+	}
+
+	// Cari GateInfo yang dipilih
+	var selectedGate GateInfo
+	for _, g := range gates {
+		if g.UserPC == selectedGateUser {
+			selectedGate = g
+			break
+		}
+	}
+
+	fmt.Println()
+
+	// Step 3: List file log di gate yang dipilih
+	logInfo(fmt.Sprintf("Listing %s di gate %s [%s]...", logLabel, selectedGate.UserPC, selectedGate.IP))
+
+	files, err := listGateLogFiles(tpUser, loc, selectedGate, remotePath)
+	if err != nil {
+		logErr("Gagal list file di gate: " + err.Error())
+		logWarn("Cek: gate PC nyala ga?")
+		return
+	}
+
+	var fileOpts []huh.Option[string]
+	for _, f := range files {
+		fileOpts = append(fileOpts, huh.NewOption(f, f))
+	}
+
+	var selectedFile string
+	fileForm := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title(fmt.Sprintf("Pilih file log dari %s:", selectedGate.UserPC)).
+				Description(fmt.Sprintf("%d file di %s", len(files), remotePath)).
+				Options(fileOpts...).
+				Value(&selectedFile).
+				Filtering(true),
+		),
+	).WithTheme(crushTheme())
+
+	if err := fileForm.Run(); err != nil {
+		logWarn("Dibatalin.")
+		return
+	}
+
+	fmt.Println()
+
+	// Step 4: 2-hop/jumping SCP — gate → /tmp/ server main → laptop
+	scpGateFileViaServerPos(tpUser, loc, selectedGate, remotePath+"/"+selectedFile, selectedFile)
+}
+
+// scpGateFileViaServerMain gasak 2-hop/jumping transfer:
+// 1. Server main SCP dari gate PC ke /tmp/<filename> di server main
+// 2. GASAK SCP dari /tmp/<filename> server main ke laptop
+// Cleanup /tmp/<filename> di server main setelah selesai tercopy ke device si requester
+func scpGateFileViaServerPos(tpUser *TeleportUser, loc *Location, gate GateInfo, remoteFilePath string, filename string) {
+	gatePass := fmt.Sprintf("pc%sclient", strings.ToLower(loc.Unicode))
+	tmpPath := fmt.Sprintf("/tmp/%s", filename)
+
+	destDir := filepath.Join(os.Getenv("HOME"), "Downloads", "logs", strings.ToUpper(loc.Unicode), gate.UserPC)
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		logErr("Gagal bikin folder lokal nih bre: " + err.Error())
+		return
+	}
+	destPath := filepath.Join(destDir, filename)
+
+	logInfo(fmt.Sprintf("Jumping 1/2 — Narik dari gate %s ke /tmp/ server main...", gate.UserPC))
+	fmt.Println(dimStyle.Render("  Ini mungkin butuh waktu ya men, tergantung ukuran file..."))
+	fmt.Println()
+
+	// Command buat running di SERVER MAIN: SCP dari gate ke /tmp/
+	hop1Cmd := fmt.Sprintf(
+		"sshpass -p '%s' scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 %s@%s:%s %s",
+		gatePass, gate.UserPC, gate.IP, remoteFilePath, tmpPath,
+	)
+
+	var hop1Err error
+
+	if tpUser.IsL2 {
+		nodeName := nodeNameFromUnicode(loc.Unicode)
+		cmd := exec.Command("tsh", "ssh",
+			fmt.Sprintf("%s@%s", nodeName, nodeName),
+			hop1Cmd,
+		)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		hop1Err = cmd.Run()
+	} else {
+		cmd := exec.Command("sshpass", "-p", SshPass,
+			"ssh",
+			"-o", "StrictHostKeyChecking=no",
+			"-o", "ConnectTimeout=10",
+			fmt.Sprintf("support@%s", loc.IP),
+			hop1Cmd,
+		)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		hop1Err = cmd.Run()
+	}
+
+	if hop1Err != nil {
+		logErr(fmt.Sprintf("Jumping 1 gagal — SCP dari gate ke server main: %v", hop1Err))
+		logWarn("Kemungkinan: gate PC offline, credential salah, atau sshpass ga ada di server main.")
+		return
+	}
+
+	logOK(fmt.Sprintf("Oke Jumping 1 selesai — file ada di /tmp/%s di server main.", filename))
+	fmt.Println()
+	logInfo("Jumping 2/2 — Narik dari server main ke laptop...")
+	fmt.Println()
+
+	// Hop/Jumping 2: GASAK SCP dari /tmp/ server main ke laptop
+	var hop2Cmd *exec.Cmd
+
+	if tpUser.IsL2 {
+		nodeName := nodeNameFromUnicode(loc.Unicode)
+		src := fmt.Sprintf("%s@%s:%s", nodeName, nodeName, tmpPath)
+		hop2Cmd = exec.Command("tsh", "scp", src, destPath)
+	} else {
+		src := fmt.Sprintf("support@%s:%s", loc.IP, tmpPath)
+		hop2Cmd = exec.Command("sshpass", "-p", SshPass,
+			"scp",
+			"-o", "StrictHostKeyChecking=no",
+			"-o", "ConnectTimeout=15",
+			src,
+			destPath,
+		)
+	}
+
+	hop2Cmd.Stdout = os.Stdout
+	hop2Cmd.Stderr = os.Stderr
+
+	if err := hop2Cmd.Run(); err != nil {
+		logErr(fmt.Sprintf("Jumping ke 2 gagal nih men — SCP dari server main ke laptop: %v", err))
+		logWarn(fmt.Sprintf("File masih ada di server main bre: %s — lu bisa SCP manual.", tmpPath))
+		return
+	}
+
+	// Cleanup /tmp/<filename> di server main
+	cleanupCmd := fmt.Sprintf("rm -f %s", tmpPath)
+	if tpUser.IsL2 {
+		nodeName := nodeNameFromUnicode(loc.Unicode)
+		exec.Command("tsh", "ssh", fmt.Sprintf("%s@%s", nodeName, nodeName), cleanupCmd).Run()
+	} else {
+		exec.Command("sshpass", "-p", SshPass,
+			"ssh", "-o", "StrictHostKeyChecking=no",
+			fmt.Sprintf("support@%s", loc.IP),
+			cleanupCmd,
+		).Run()
+	}
+
+	fmt.Println()
+	logOK(fmt.Sprintf("Mantap men! Log gate berhasil disimpen di: %s", destPath))
+	logOK(fmt.Sprintf("File /tmp/%s di server main udah otomatis di-cleanup.", filename))
+}
+
+func runSettlementRFS() {
+	homeDir, _ := os.UserHomeDir()
+	scriptPath := filepath.Join(homeDir, "gasak-dist", "settlement_rfs.py")
+
+	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
+		logErr("Script settlement_rfs.py gaada nih men: " + scriptPath)
+		logInfo("Coba jalanin ulang install.sh rilis terbaru.")
+		return
+	}
+
+	if CmsDbHost == "" || CmsDbUser == "" || CmsDbPass == "" || CmsDbName == "" {
+		logErr("CMS DB credentials belum di-set di .env!")
+		logInfo("Tambahin key berikut ke file .env lu men:")
+		fmt.Println(dimStyle.Render("  CMS_DB_HOST=<host>"))
+		fmt.Println(dimStyle.Render("  CMS_DB_PORT=5432"))
+		fmt.Println(dimStyle.Render("  CMS_DB_USER=<user>"))
+		fmt.Println(dimStyle.Render("  CMS_DB_PASS=<password>"))
+		fmt.Println(dimStyle.Render("  CMS_DB_NAME=<dbname>"))
+		return
+	}
+
+	logInfo("Gasak Settlement RFS...")
+	fmt.Println()
+
+	cmd := exec.Command("python3", scriptPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	cmd.Env = append(os.Environ(),
+		"CMS_DB_HOST="+CmsDbHost,
+		"CMS_DB_PORT="+CmsDbPort,
+		"CMS_DB_USER="+CmsDbUser,
+		"CMS_DB_PASS="+CmsDbPass,
+		"CMS_DB_NAME="+CmsDbName,
+	)
+	if err := cmd.Run(); err != nil {
+		logWarn("Script exited: " + err.Error())
+	}
+}
+
+func runSettlementDecode() {
+	homeDir, _ := os.UserHomeDir()
+	scriptPath := filepath.Join(homeDir, "gasak-dist", "decode_and_merge.py")
+
+	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
+		logErr("Script decode_and_merge.py gaada nih men: " + scriptPath)
+		logInfo("Coba jalanin ulang install.sh rilis terbaru.")
+		return
+	}
+
+	logInfo("Gasak Settlement Decode...")
+	fmt.Println()
+
+	cmd := exec.Command("python3", scriptPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	if err := cmd.Run(); err != nil {
+		logWarn("Script exited: " + err.Error())
+	}
 }

@@ -1,6 +1,9 @@
 #!/bin/bash
 
-
+# ─────────────────────────────────────────────────────────────
+# GASAK DEPLOYER - Server Deployment Tool
+# Mengkompilasi binary Go dan push seluruh toolchain ke 10.70.0.110
+# ─────────────────────────────────────────────────────────────
 
 set -euo pipefail
 
@@ -14,7 +17,7 @@ SUPENG_IP="10.70.0.110"
 SUPENG_DIR="/home/parkee/gasak-dist"
 SSH_KEY="$HOME/.ssh/id_rsa"
 
-ENV_FILE="$LOCAL_PROJECT_DIR/.env"   
+ENV_FILE="$HOME/.env"
 
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
@@ -39,13 +42,11 @@ echo -e "${CYAN}  Dist    : ${GREEN}${LOCAL_DIST_DIR}${RESET}"
 echo -e "${CYAN}  Target  : ${GREEN}${SUPENG_USER}@${SUPENG_IP}:${SUPENG_DIR}${RESET}"
 echo -e "${CYAN}────────────────────────────────────────────────────────────${RESET}"
 
-
 if [ ! -f "$SSH_KEY" ]; then
     err "SSH key tidak ditemukan: ${SSH_KEY}"
     err "Generate dulu: ssh-keygen -t rsa -b 4096"
     exit 1
 fi
-
 
 info "Cek koneksi ke server supeng..."
 if ! ping -c 1 -W 3 "$SUPENG_IP" > /dev/null 2>&1; then
@@ -60,7 +61,6 @@ step "1/4" "Compile GASAK binary (linux/amd64)..."
 
 cd "$LOCAL_PROJECT_DIR"
 
-
 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o ./gasak_linux .
 
 ok "Kompilasi selesai: $(du -sh ./gasak_linux | cut -f1)"
@@ -72,7 +72,6 @@ step "2/4" "Upload binary ke server supeng..."
 info "Uploading gasak binary..."
 scp -i "$SSH_KEY" -q ./gasak_linux "${SUPENG_USER}@${SUPENG_IP}:${SUPENG_DIR}/gasak"
 
-
 rm -f ./gasak_linux
 ok "Binary gasak terupload"
 
@@ -80,15 +79,15 @@ ok "Binary gasak terupload"
 
 step "3/4" "Upload semua aset dari local dist dir..."
 
-
 DIST_FILES=(
     "datetime"
     "socketserver"
     "crush"
-    "install.sh"
     "serve.sh"
     "log_cleaner.py"
     "deploy_parkee.py"
+    "settlement_rfs.py"
+    "decode_and_merge.py"
     "log_cleaner_gum.sh"
     "log_cleaner_enhanced.sh"
     "version.txt"
@@ -97,6 +96,19 @@ DIST_FILES=(
 MISSING_FILES=()
 UPLOAD_LIST=()
 
+# Sinkronisasi install.sh dari root project dir (Development Workspace)
+if [ -f "${LOCAL_PROJECT_DIR}/install.sh" ]; then
+    UPLOAD_LIST+=("${LOCAL_PROJECT_DIR}/install.sh")
+    info "Queue: install.sh (dari project workspace)"
+elif [ -f "${LOCAL_DIST_DIR}/install.sh" ]; then
+    UPLOAD_LIST+=("${LOCAL_DIST_DIR}/install.sh")
+    info "Queue: install.sh (dari local dist)"
+else
+    MISSING_FILES+=("install.sh")
+    echo -e "   ${RED}SKIP (tidak ada): install.sh${RESET}"
+fi
+
+# Looping sisanya dari local dist dir
 for f in "${DIST_FILES[@]}"; do
     if [ -f "${LOCAL_DIST_DIR}/${f}" ]; then
         UPLOAD_LIST+=("${LOCAL_DIST_DIR}/${f}")
@@ -106,7 +118,6 @@ for f in "${DIST_FILES[@]}"; do
         echo -e "   ${RED}SKIP (tidak ada): ${f}${RESET}"
     fi
 done
-
 
 if [ -f "${LOCAL_DIST_DIR}/server.properties" ]; then
     UPLOAD_LIST+=("${LOCAL_DIST_DIR}/server.properties")
@@ -123,7 +134,7 @@ else
     exit 1
 fi
 
-# ========== TAMBAHAN: UPLOAD .env DARI PROJECT DIR ==========
+# ========== INJECT .env DARI PROJECT DIR ==========
 if [ -f "$ENV_FILE" ]; then
     info "Upload .env dari project dir..."
     scp -i "$SSH_KEY" -q "$ENV_FILE" "${SUPENG_USER}@${SUPENG_IP}:${SUPENG_DIR}/"
@@ -131,10 +142,10 @@ if [ -f "$ENV_FILE" ]; then
 else
     echo -e "   ${YELLOW}WARNING: .env tidak ditemukan di ${LOCAL_PROJECT_DIR}${RESET}"
 fi
-# ============================================================
+# =================================================─
 
 if [ ${#MISSING_FILES[@]} -gt 0 ]; then
-    echo -e "   ${YELLOW}Warning: File berikut tidak ada di local dist, dilewati:${RESET}"
+    echo -e "   ${YELLOW}Warning: File berikut tidak ada di local workspace/dist, dilewati:${RESET}"
     for m in "${MISSING_FILES[@]}"; do
         echo -e "   ${YELLOW}- ${m}${RESET}"
     done
@@ -149,7 +160,7 @@ set -e
 
 DIST_DIR="${SUPENG_DIR}"
 
-echo "   -> Fixing permissions semua aset..."
+echo "   -> Fixing permissions semua aset di server..."
 chmod +x "\${DIST_DIR}/gasak" 2>/dev/null || true
 chmod +x "\${DIST_DIR}/datetime" 2>/dev/null || true
 chmod +x "\${DIST_DIR}/socketserver" 2>/dev/null || true
@@ -157,7 +168,7 @@ chmod +x "\${DIST_DIR}/crush" 2>/dev/null || true
 chmod +x "\${DIST_DIR}/serve.sh" 2>/dev/null || true
 find "\${DIST_DIR}" -maxdepth 1 -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
 
-# Set permission buat .env biar aman (cuma gasak yg baca)
+# Set permission buat .env biar aman (cuma biner gasak yg berhak baca)
 chmod 600 "\${DIST_DIR}/.env" 2>/dev/null || true
 
 echo "   -> Kill proses serve lama..."
@@ -183,7 +194,7 @@ REMOTE
 
 # ─── DONE ────────────────────────────────────────────────────
 
-GASAK_VERSION=$(cat "${LOCAL_DIST_DIR}/version.txt" 2>/dev/null | tr -d '[:space:]' || echo "unknown")
+GASAK_VERSION=$(cat "${LOCAL_DIST_DIR}/version.txt" 2>/dev/null | tr -d '[:space:]' || echo "1.1.12")
 
 echo ""
 echo -e "${GREEN}────────────────────────────────────────────────────────────${RESET}"
