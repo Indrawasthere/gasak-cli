@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ─────────────────────────────────────────────────────────────
-# GASAK DIST SERVER - Server Supeng Side
+# GASAK DIST SERVER - Server Supeng Side (Secure & Fixed)
 # ─────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -13,18 +13,40 @@ cd "$DIST_DIR" || exit 1
 
 chmod +x gasak 2>/dev/null || true
 
-echo "-> Starting distribution server on port ${PORT}..."
+echo "-> Starting SECURE distribution server on port ${PORT}..."
 
-# Jalankan python server internal dengan tipe inline script
+# Jalankan python server dengan whitelist system secara inline
 python3 -c "
 import http.server
 import socketserver
 import os
-import sys
 
-class GasakDistHandler(http.server.SimpleHTTPRequestHandler):
+ALLOWED_FILES = {
+    'gasak',
+    'install.sh',
+    'log_cleaner.py',
+    'deploy_parkee.py',
+    'settlement_rfs.py',
+    'decode_and_merge.py',
+    'version.txt',
+    'server.properties'
+}
+
+class SecureGasakDistHandler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        requested_file = os.path.basename(self.path.strip('/'))
+
+        # Blokir total jika akses root atau file di luar whitelist
+        if self.path == '/' or (requested_file and requested_file not in ALLOWED_FILES):
+            self.send_error(404, 'File Not Found')
+            return
+
+        super().do_GET()
+
     def end_headers(self):
         self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate')
+        self.send_header('Pragma', 'no-cache')
+        self.send_header('Expires', '0')
         super().end_headers()
 
     def guess_type(self, path):
@@ -33,6 +55,6 @@ class GasakDistHandler(http.server.SimpleHTTPRequestHandler):
         return super().guess_type(path)
 
 socketserver.TCPServer.allow_reuse_address = True
-with socketserver.TCPServer(('', ${PORT}), GasakDistHandler) as httpd:
+with socketserver.TCPServer(('', ${PORT}), SecureGasakDistHandler) as httpd:
     httpd.serve_forever()
 "
