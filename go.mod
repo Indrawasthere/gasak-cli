@@ -1,6 +1,6 @@
 module my-cli-app
 
-go 1.23
+go 1.24.2
 
 require (
 	github.com/charmbracelet/glamour v1.0.0
