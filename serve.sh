@@ -43,6 +43,7 @@ from datetime import datetime
 ALLOWED_FILES = {
     'gasak',
     'install.sh',
+    'reinstall.sh'
     'deploy_parkee.py',
     'settlement_rfs.py',
     'decode_and_merge.py',
