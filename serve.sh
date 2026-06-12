@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ─────────────────────────────────────────────────────────────
-# GASAK DIST SERVER - Server Supeng Side (Secure & Hardcoded Port)
+# GASAK DIST SERVER - Server Supeng Side (Heredoc Secure Edition)
 # ─────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -13,8 +13,8 @@ chmod +x gasak 2>/dev/null || true
 
 echo "-> Starting SECURE distribution server on port 9001..."
 
-# Jalankan python server dengan whitelist system secara inline (Port 9001 di-hardcode biar gak dicolong bash)
-python3 -c "
+# Pakai Heredoc (<< 'EOF') biar python beneran ngebaca sebagai script block mandiri
+python3 << 'EOF'
 import http.server
 import socketserver
 import os
@@ -55,4 +55,4 @@ class SecureGasakDistHandler(http.server.SimpleHTTPRequestHandler):
 socketserver.TCPServer.allow_reuse_address = True
 with socketserver.TCPServer(('', 9001), SecureGasakDistHandler) as httpd:
     httpd.serve_forever()
-"
+EOF
