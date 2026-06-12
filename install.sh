@@ -2,7 +2,7 @@
 
 # ─────────────────────────────────────────────────────────────
 # GASAK TOOLCHAIN INSTALLER - ULTIMATE AUTO-REMEDIAL VERSION
-# Dirancang untuk Fresh Install, Perbaikan Environment, dan Setup .env
+# Dirancang untuk Fresh Install, Perbaikan Environment, dan Auto .env
 # ─────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -34,16 +34,10 @@ echo -e "\n${YELLOW}[Step 1] Membabat Sisa-Sisa File Lama (Fresh Wipe)...${RESET
 # Hapus symlink lama jika ada bentrok permission
 sudo rm -f "${LOCAL_BIN}/gasak" "${LOCAL_BIN}/tembak-agent" "${LOCAL_BIN}/settlement-rfs" "${LOCAL_BIN}/settlement-decode" 2>/dev/null || true
 
-# Back up file .env lama jika user ternyata sudah pernah isi config
-if [ -f "${INSTALL_DIR}/.env" ]; then
-    echo -e "   -> ${PURPLE}Menemukan .env lama, diamankan ke /tmp/.env.bak${RESET}"
-    cp "${INSTALL_DIR}/.env" /tmp/.env.bak
-fi
-
 echo -e "   -> Membersihkan direktori kerja lama..."
-# Jangan hapus total foldernya agar proses aman, kita hapus isinya saja selain backup
 mkdir -p "$INSTALL_DIR"
-find "$INSTALL_DIR" -maxdepth 1 -type f ! -name '.env' -delete 2>/dev/null || true
+# Bersihkan file lama agar tidak bentrok, kita timpa semuanya fresh
+find "$INSTALL_DIR" -maxdepth 1 -type f -delete 2>/dev/null || true
 
 # ─── 2. JARINGAN ZEROTIER PRE-FLIGHT CHECK ───────────────────
 echo -e "\n${YELLOW}[Step 2] Validasi Jaringan Overlay ZeroTier...${RESET}"
@@ -123,40 +117,34 @@ done
 # Pastikan binary gasak bisa dieksekusi
 chmod +x gasak
 
-# ─── 6. AUTOMATED .ENV TEMPLATE ENGINE GENERATOR ─────────────
-echo -e "\n${YELLOW}[Step 6] Memeriksa dan Membangun File Konfigurasi Environment (.env)...${RESET}"
+# ─── 6. AUTOMATED .ENV INJECTOR UTILITY ──────────────────────
+echo -e "\n${YELLOW}[Step 6] Membangun File Konfigurasi Environment Berisi Kredensial (.env)...${RESET}"
 
-if [ -f /tmp/.env.bak ]; then
-    echo -e "   -> ${GREEN}Mengembalikan konfigurasi .env lama lu men...${RESET}"
-    mv /tmp/.env.bak "${INSTALL_DIR}/.env"
-elif [ ! -f "${INSTALL_DIR}/.env" ]; then
-    echo -e "   -> ${YELLOW}File .env tidak ditemukan. Membuat template baru...${RESET}"
-    cat << 'EOF' > "${INSTALL_DIR}/.env"
+# Menulis langsung kredensial asli ke laptop user secara otomatis
+cat << 'EOF' > "${INSTALL_DIR}/.env"
 # ─────────────────────────────────────────────────────────────
-# GASAK CONFIGURATION ENVIRONMENT VARIABLE
-# Silakan isi parameter di bawah sesuai kebutuhan internal
+# GASAK CONFIGURATION ENVIRONMENT VARIABLE (AUTO-GENERATED)
 # ─────────────────────────────────────────────────────────────
 
 # GLPI & Knowledge Base Config
-GLPI_URL=
-OUTLINE_URL=
-OUTLINE_API_KEY=
-LINEAR_API_KEY=
+GLPI_URL=https://parkee-ticket.nusa.technology/
+OUTLINE_URL=https://docs.sistemparkiran.com/home
+OUTLINE_API_KEY=REMOVED_OUTLINE_KEY
+LINEAR_API_KEY=REMOVED_LINEAR_KEY
 
-# SSH Creds untuk Operasional Agent Lapangan
+# SSH
 PARKEE_SSH_USER=support
-PARKEE_SSH_PASS=
+PARKEE_SSH_PASS=REMOVED_PASSWORD
 
-# CMS Database Cluster Connection Info (Sangat Penting untuk RFS)
-CMS_DB_HOST=
+# CMS Database (Settlement Tools)
+CMS_DB_HOST=newdbparkeeproduction.cmxwbzwcs2rw.ap-southeast-1.rds.amazonaws.com
 CMS_DB_PORT=5432
-CMS_DB_USER=
-CMS_DB_PASS=
-CMS_DB_NAME=
+CMS_DB_USER=product
+CMS_DB_PASS=Parkee545115
+CMS_DB_NAME=parkee
 EOF
-    echo -e "   -> ${GREEN}Template .env berhasil di-generate di ${INSTALL_DIR}/.env${RESET}"
-fi
 
+echo -e "   -> ${GREEN}File .env berhasil dibuat dan diisi kredensial resmi Parkee!${RESET}"
 # Kunci hak akses .env agar aman (Read/Write hanya untuk user aktif)
 chmod 600 "${INSTALL_DIR}/.env"
 
@@ -199,7 +187,7 @@ echo -e "${GREEN}      GASAK CLI TOOLCHAIN BERHASIL TERPASANG 100% MEN!      ${R
 echo -e "${GREEN}────────────────────────────────────────────────────────────${RESET}"
 echo -e "  • Aplikasi Versi  : ${PURPLE}${GASAK_VERSION}${RESET}"
 echo -e "  • Lokasi Instalasi : ${CYAN}${INSTALL_DIR}${RESET}"
-echo -e "  • Konfigurasi      : ${YELLOW}Silakan lengkapi nano ${INSTALL_DIR}/.env${RESET}"
+echo -e "  • Status Kredensial: ${GREEN}TERISI OTOMATIS & SECURE${RESET}"
 echo -e "${GREEN}────────────────────────────────────────────────────────────${RESET}"
-echo -e "  User/Lead lu sekarang tinggal ketik global command: ${CYAN}gasak${RESET}"
+echo -e "   Sekarang tinggal ketik global command: ${CYAN}gasak${RESET}"
 echo ""
