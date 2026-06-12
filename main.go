@@ -121,13 +121,13 @@ func getGreeting() string {
 	h := time.Now().Hour()
 	switch {
 	case h < 11:
-		return "Pagi men, ngopi dulu jangan lupa men..."
+		return "Pagi men, ngopi dulu jangan lupa yak"
 	case h < 15:
-		return "Siang men, jangan lupa baca dokumentasi"
+		return "Siang men, jangan lupa check task yak"
 	case h < 18:
-		return "Sore men, rokok dulu ga sih?..."
+		return "Sore men, rokok kopi dulu ga sih?..."
 	default:
-		return "Lah kok lu masih di kantor men?"
+		return "Sudah malam? atau sudah tau?"
 	}
 }
 
@@ -379,7 +379,7 @@ func checkAndRunUpdate() {
 	serverVersion := strings.TrimSpace(string(serverVerBytes))
 
 	if serverVersion != "" && serverVersion != AppVersion {
-		fmt.Printf("\x1b[33m⚠ Versi baru ditemukan (%s). Melakukan auto-update, mohon tunggu...\x1b[0m\n", serverVersion)
+		fmt.Printf("\x1b[33m⚠ Versi baru ada nich (%s). Jalanin auto-update, tungguin men...\x1b[0m\n", serverVersion)
 
 		execPath, err := os.Executable()
 		if err != nil {
@@ -404,7 +404,7 @@ func checkAndRunUpdate() {
 
 		_, err = io.Copy(out, respBin.Body)
 		if err == nil {
-			fmt.Println("\x1b[32m✔ GASAK berhasil di-update ke versi terbaru! Harap jalankan ulang perintah.\x1b[0m")
+			fmt.Println("\x1b[32m✔ GASAK berhasil di-update ke versi terbaru! Jalan lupa source zsh atau bash terus gasak lagi.\x1b[0m")
 			os.Exit(0)
 		}
 	}
@@ -423,16 +423,20 @@ func main() {
 		logInfo(fmt.Sprintf("Detected as %s (Role: %s)", tpUser.Username, tpUser.Role))
 	}
 	fmt.Println()
-	fmt.Println(dimStyle.Render("  Lu mau gasak apaan hari ini?"))
+	fmt.Println(dimStyle.Render("  Lu mau gasak apaan hari ini men?"))
 	fmt.Println()
 
 	for {
 		var action string
-
 		var options []huh.Option[string]
 
+		options = append(options, huh.NewOption("Login Teleport", "tsh_login"))
+
+		if tpUser.IsL2 {
+			options = append(options, huh.NewOption("Central v2", "parkee_cloud"))
+		}
+
 		options = append(options,
-			huh.NewOption("Login Teleport", "tsh_login"),
 			huh.NewOption("Tembak Agent", "parkee_launcher"),
 			huh.NewOption("Location Lookup", "location_lookup"),
 			huh.NewOption("Potong Log", "log_range"),
@@ -443,7 +447,6 @@ func main() {
 
 		if tpUser.IsL2 {
 			options = append(options,
-				huh.NewOption("Central v2", "parkee_cloud"),
 				huh.NewOption("Superfile", "superfile"),
 				huh.NewOption("Search Outline Docs", "search_outline"),
 				huh.NewOption("Search Linear Issues", "search_linear"),
