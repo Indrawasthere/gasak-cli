@@ -51,6 +51,12 @@ info "Sinkronisasi repositori & pasang dependensi core sistem..."
 echo -e "   ${PURPLE}(Membutuhkan hak akses sudo untuk melengkapi library sistem)${RESET}"
 
 sudo -v
+# --- TAMBAHKAN BARIS AUTO-REPAIR INI ---
+info "Melakukan auto-repair pada apt package manager (jika ada broken)..."
+sudo dpkg --configure -a || true
+sudo apt-get install -f -y || true
+# ---------------------------------------
+
 sudo apt-get update -y
 
 # Dependensi mutlak: python3-tk (untuk log_cleaner UI), fzf (untuk iterfzf di deploy tool)
