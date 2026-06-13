@@ -5,7 +5,10 @@
 # Target OS: Debian, Ubuntu, Linux Mint, dan semua turunannya
 # ─────────────────────────────────────────────────────────────
 
-set -euo pipefail
+# NOTE: Intentionally NO set -e disini.
+# APT failure di device lapangan = hal biasa (broken repo, expired key, dll).
+# Script harus tetap lanjut selama Python dan pip tersedia.
+set -uo pipefail
 
 # ─── CONFIGURATION ───────────────────────────────────────────
 SERVER_IP="10.70.0.110"
@@ -72,16 +75,25 @@ else
 fi
 
 # ─── STEP 2: INSTALL DEPENDENSI SISTEM VIA APT ───────────────
-section "STEP 2/8 — INSTALL SYSTEM DEPENDENCIES"
-info "Membutuhkan akses sudo untuk install dependensi sistem..."
-sudo -v
+section "STEP 2/8 — INSTALL SYSTEM DEPENDENCIES (NON-BLOCKING)"
+info "Step ini NON-BLOCKING — APT error tidak akan menghentikan installer."
+info "Mencoba sudo untuk install dependensi sistem (opsional)..."
+# sudo -v gagal juga tidak apa-apa, kita lanjut
+sudo -v 2>/dev/null || warn "sudo tidak tersedia / gagal. APT install akan di-skip."
 
 info "Auto-repair APT package manager (jika ada broken packages)..."
 sudo dpkg --configure -a 2>/dev/null || true
 sudo apt-get install -f -y 2>/dev/null || true
 
-info "Update daftar repositori APT..."
-sudo apt-get update -y -q
+info "Update daftar repositori APT (non-blocking — gagal = lanjut)..."
+# apt-get update sengaja dibungkus || true.
+# Banyak device lapangan punya repo broken / expired GPG key / mirror lambat.
+# Yang penting Python & pip tersedia — APT update bukan blocker.
+if ! sudo apt-get update -y -q 2>/dev/null; then
+    warn "apt-get update gagal (broken repo / GPG / network issue)."
+    warn "Installer akan tetap lanjut — install package satu per satu."
+    warn "Kalau ada package yang skip, cek 'sudo apt-get update' manual."
+fi
 
 # Semua APT dependencies yang dibutuhkan seluruh toolchain:
 # - python3, python3-pip, python3-tk     → runtime python + tkinter (log_cleaner.py)
@@ -112,21 +124,42 @@ INSTALLED_NEW=()
 ALREADY_INSTALLED=()
 FAILED_APT=()
 
+APT_AVAILABLE=true
+if ! command_exists apt-get; then
+    warn "apt-get tidak tersedia di sistem ini. Skip APT install, lanjut ke pip."
+    APT_AVAILABLE=false
+fi
+
 for pkg in "${APT_DEPS[@]}"; do
     if dpkg -s "$pkg" >/dev/null 2>&1; then
         ALREADY_INSTALLED+=("$pkg")
         ok "Sudah ada: ${pkg}"
-    else
+    elif [ "$APT_AVAILABLE" = true ]; then
         info "Menginstall: ${pkg}..."
-        if sudo apt-get install -y -q "$pkg" 2>/dev/null; then
+        # Paksa non-interactive, bungkus || true biar satu package gagal != abort
+        if DEBIAN_FRONTEND=noninteractive sudo apt-get install -y -q "$pkg" 2>/dev/null || \
+           DEBIAN_FRONTEND=noninteractive sudo apt-get install -y "$pkg" 2>/dev/null; then
             INSTALLED_NEW+=("$pkg")
             ok "Berhasil install: ${pkg}"
         else
-            warn "Gagal install via APT: ${pkg} (akan dicoba alternatif)"
+            warn "Gagal install via APT: ${pkg} — akan dicoba alternatif / skip"
             FAILED_APT+=("$pkg")
         fi
+    else
+        warn "Skip APT untuk: ${pkg} (apt-get tidak tersedia)"
+        FAILED_APT+=("$pkg")
     fi
 done
+
+# Summary APT — non-fatal, cuma informasi
+if [ ${#FAILED_APT[@]} -ne 0 ]; then
+    warn "Package APT berikut gagal install (NON-FATAL — installer tetap lanjut):"
+    for p in "${FAILED_APT[@]}"; do
+        warn "  - $p"
+    done
+    warn "Kalau butuh package ini, coba manual: sudo apt-get install ${FAILED_APT[*]}"
+    warn "Installer lanjut ke step berikutnya..."
+fi
 
 # Khusus: python-is-python3 kadang tidak ada di semua distro/versi
 # Fallback: buat symlink manual
