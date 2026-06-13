@@ -84,18 +84,28 @@ warn "Kalau ada yang miss, nanti dikasih tau di summary bawah ya men."
 echo ""
 
 # Coba sudo dulu — kalau gagal juga gapapa, APT emang skip
-sudo -v 2>/dev/null || warn "sudo gak available. APT install di-skip semua."
+SUDO_OK=false
+if sudo -v 2>/dev/null; then
+    SUDO_OK=true
+else
+    warn "sudo gak available. APT install di-skip semua."
+fi
 
-# Repair dulu kalau ada broken packages sebelum install apapun
-info "Nyoba repair broken packages dulu (kalau ada)..."
-sudo dpkg --configure -a 2>/dev/null || true
-sudo apt-get install -f -y 2>/dev/null || true
+# Detect APT status — kalau update gagal, tetap coba install (package mungkin di local cache)
+APT_UPDATE_OK=true
+if [ "$SUDO_OK" = true ] && command_exists apt-get; then
+    info "Ngecek status APT..."
+    if ! timeout 15 sudo apt-get update -y -q 2>/dev/null; then
+        warn "apt-get update gagal — tapi tetap coba install dari local cache."
+        APT_UPDATE_OK=false
+    fi
+fi
 
-# apt-get update — bungkus, gagal gapapa
-info "apt-get update... (kalau ini gagal, installer tetap lanjut)"
-if ! sudo apt-get update -y -q 2>/dev/null; then
-    warn "apt-get update gagal — broken repo, expired GPG key, atau network issue."
-    warn "Install package satu-satu tetap dicoba, mana yang bisa masuk."
+# Repair dulu kalau APT OK (biar gak hang di sistem broken)
+if [ "$APT_UPDATE_OK" = true ] && [ "$SUDO_OK" = true ]; then
+    info "Nyoba repair broken packages dulu (kalau ada)..."
+    timeout 30 sudo dpkg --configure -a 2>/dev/null || warn "dpkg configure timeout/failed, skip"
+    timeout 30 sudo apt-get install -f -y 2>/dev/null || warn "apt-get -f timeout/failed, skip"
 fi
 
 # Package yang dibutuhin:
@@ -126,10 +136,14 @@ INSTALLED_NEW=()
 ALREADY_INSTALLED=()
 FAILED_APT=()
 
-APT_AVAILABLE=true
-if ! command_exists apt-get; then
-    warn "apt-get gak ada di sistem ini. Skip semua APT install."
-    APT_AVAILABLE=false
+# APT_AVAILABLE: true kalau sudo + apt-get ada (tetap coba walau update gagal)
+APT_AVAILABLE=false
+if [ "$SUDO_OK" = true ] && command_exists apt-get; then
+    APT_AVAILABLE=true
+fi
+
+if [ "$APT_AVAILABLE" = false ]; then
+    warn "apt-get gak ada / sudo gak available. Skip semua APT install."
 fi
 
 for pkg in "${APT_DEPS[@]}"; do
@@ -138,7 +152,7 @@ for pkg in "${APT_DEPS[@]}"; do
         ok "Udah ada: ${pkg}"
     elif [ "$APT_AVAILABLE" = true ]; then
         info "Install: ${pkg}..."
-        if DEBIAN_FRONTEND=noninteractive sudo apt-get install -y -q "$pkg" 2>/dev/null; then
+        if DEBIAN_FRONTEND=noninteractive timeout 60 sudo apt-get install -y -q "$pkg" 2>/dev/null; then
             INSTALLED_NEW+=("$pkg")
             ok "Keinstall: ${pkg}"
         else
@@ -561,6 +575,11 @@ if [ ${#FAILED_APT[@]} -ne 0 ]; then
     done
     echo -e "  └─ ${YELLOW}Fix: sudo apt-get install ${FAILED_APT[*]}${RESET}"
     echo ""
+fi
+
+# Info kalau APT update gagal tapi tetap jalan
+if [ "$APT_UPDATE_OK" = false ]; then
+    warn "Note: apt-get update gagal, tapi package tetap dicoba install dari cache."
 fi
 
 echo -e "${CYAN}════════════════════════════════════════════════════════════${RESET}"

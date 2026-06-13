@@ -164,7 +164,7 @@ func showSplash() {
    ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝`
 
 	ascii := accentStyle.Render(rawASCII)
-	subtitle := dimStyle.Render("  Parkee Gasak CLI  •  Fadlan's Handmade")
+	subtitle := dimStyle.Render("  Parkee Gasak CLI  •  Fadlan's Handmade  •  v" + AppVersion)
 
 	greetLine := greetStyle.Render("Konichiwa " + name + ",")
 	greetLine2 := greetStyle.Render(greeting)
@@ -491,16 +491,36 @@ func main() {
 		case "parkee_cloud":
 			runParkeeCloud()
 		case "parkee_launcher":
+			if !checkSSHPass() {
+				logErr("sshpass tidak terinstall.")
+				logInfo("Jalankan: sudo apt-get install sshpass")
+				break
+			}
 			runParkeeLauncher()
 		case "location_lookup":
+			if !checkSSHPass() {
+				logErr("sshpass tidak terinstall.")
+				logInfo("Jalankan: sudo apt-get install sshpass")
+				break
+			}
 			runLocationLookup()
 		case "search_outline":
 			runOutlineSearch()
 		case "search_linear":
 			runLinearSearch()
 		case "log_range":
+			if !checkPythonTk() {
+				logErr("python3-tk tidak terinstall.")
+				logInfo("Jalankan: sudo apt-get install python3-tk")
+				break
+			}
 			runLogCleaner()
 		case "fetch_log":
+			if !checkSSHPass() {
+				logErr("sshpass tidak terinstall.")
+				logInfo("Jalankan: sudo apt-get install sshpass")
+				break
+			}
 			runFetchLog(tpUser)
 		case "settlement_rfs":
 			runSettlementRFS()
@@ -1353,6 +1373,20 @@ func truncate(s string, n int) string {
 
 func nodeNameFromUnicode(unicode string) string {
 	return "server-" + strings.ToLower(strings.TrimSpace(unicode))
+}
+
+func commandExists(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
+}
+
+func checkSSHPass() bool {
+	return commandExists("sshpass")
+}
+
+func checkPythonTk() bool {
+	cmd := exec.Command("python3", "-c", "import tkinter")
+	return cmd.Run() == nil
 }
 
 func runFetchLog(tpUser *TeleportUser) {
