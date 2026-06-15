@@ -66,10 +66,17 @@ import socketserver
 import os
 import sys
 import json
+import hmac
 from datetime import datetime
+from urllib.parse import urlparse, parse_qs
 
 PORT = 9001
 LOG_FILE = "dist_server.log"
+
+# Token distribusi — set via env var di server supeng sebelum jalanin serve.sh
+# export GASAK_DIST_TOKEN="gsk_dist_9f2k7x"
+# Kalau env var gak di-set, server tetap jalan tapi endpoint /getenv selalu 403
+DIST_TOKEN = os.environ.get("GASAK_DIST_TOKEN", "")
 
 class GasakDistHandler(http.server.SimpleHTTPRequestHandler):
     # Whitelist ketat: hanya file ini yang boleh diakses client
@@ -88,7 +95,13 @@ class GasakDistHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         # Ambil filename bersih dari path
-        filename = os.path.basename(self.path.split('?')[0])
+        parsed = urlparse(self.path)
+        filename = os.path.basename(parsed.path.split('?')[0])
+
+        # Endpoint khusus: /getenv — serve .env dengan token auth
+        if parsed.path.startswith('/getenv'):
+            self.handle_getenv(parsed)
+            return
 
         # Default ke install.sh kalau akses root
         if not filename or filename in ('', '/'):
@@ -134,6 +147,50 @@ class GasakDistHandler(http.server.SimpleHTTPRequestHandler):
             self.log_request_detail(0, filename, "CLIENT DISCONNECTED")
         except Exception as e:
             self.log_request_detail(500, filename, f"ERROR: {e}")
+
+    def handle_getenv(self, parsed):
+        """Endpoint /getenv — serve .env hanya kalau token valid"""
+        params = parse_qs(parsed.query)
+        token = params.get('token', [''])[0]
+        client_ip = self.client_address[0]
+
+        # Kalau DIST_TOKEN belum di-set di server, tolak semua request
+        if not DIST_TOKEN:
+            self.log_request_detail(503, 'getenv', "SERVER MISCONFIGURED — GASAK_DIST_TOKEN not set")
+            self.send_error(503, "Server misconfigured: GASAK_DIST_TOKEN not set.")
+            return
+
+        # Validasi token — pakai hmac.compare_digest biar aman dari timing attack
+        if not hmac.compare_digest(token, DIST_TOKEN):
+            self.log_request_detail(403, 'getenv', f"DENIED — invalid token from {client_ip}")
+            self.send_error(403, "Access Denied: invalid distribution token.")
+            return
+
+        # Cek file .env ada di server
+        env_path = os.path.join(os.getcwd(), '.env')
+        if not os.path.isfile(env_path):
+            self.log_request_detail(404, 'getenv', ".env NOT FOUND on server")
+            self.send_error(404, ".env not found on server — hubungi Fadlan.")
+            return
+
+        try:
+            file_size = os.path.getsize(env_path)
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/plain; charset=utf-8')
+            self.send_header('Content-Length', str(file_size))
+            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+            self.send_header('X-GASAK-Server', 'ParkeeDistServer/1.0')
+            self.end_headers()
+
+            with open(env_path, 'rb') as f:
+                self.wfile.write(f.read())
+
+            self.log_request_detail(200, 'getenv', f"OK — .env served ({file_size} bytes) to {client_ip}")
+
+        except BrokenPipeError:
+            self.log_request_detail(0, 'getenv', "CLIENT DISCONNECTED")
+        except Exception as e:
+            self.log_request_detail(500, 'getenv', f"ERROR: {e}")
 
     def detect_content_type(self, filename):
         """Deteksi content-type yang tepat untuk tiap file"""
@@ -184,5 +241,3 @@ except OSError as e:
     print(f"    Kemungkinan port {PORT} masih dipakai. Cek: sudo lsof -i:{PORT}", flush=True)
     sys.exit(1)
 PYEOF
-SCRIPT_EOF
-echo "DONE"
