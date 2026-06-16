@@ -13,6 +13,8 @@ set -uo pipefail
 # ─── CONFIG ───────────────────────────────────────────────────
 SERVER_IP="10.70.0.110"
 SERVER_PORT="9001"
+VAULT_PORT="9002"
+GASAK_DIST_TOKEN="gsk_dist_9f2k7x"
 BASE_URL="http://${SERVER_IP}:${SERVER_PORT}"
 INSTALL_DIR="$HOME/gasak-dist"
 ENV_PATH="${INSTALL_DIR}/.env"
@@ -58,8 +60,7 @@ else
     warn "Gak bisa deteksi distro, lanjut aja dengan asumsi Debian-based."
 fi
 
-# Cek koneksi ke server distribusi — ini blocker, kalau ga bisa konek ya
-# percuma download apapun
+# Cek koneksi ke server distribusi
 info "Ngecek koneksi ke server distribusi ${SERVER_IP}:${SERVER_PORT}..."
 if curl -fsSL --max-time 10 --connect-timeout 5 \
     "${BASE_URL}/version.txt" -o /dev/null 2>/dev/null; then
@@ -83,7 +84,7 @@ warn "Step ini NON-BLOCKING. APT gagal = lanjut, bukan abort."
 warn "Kalau ada yang miss, nanti dikasih tau di summary bawah ya men."
 echo ""
 
-# Coba sudo dulu — kalau gagal juga gapapa, APT emang skip
+# Coba sudo dulu
 SUDO_OK=false
 if sudo -v 2>/dev/null; then
     SUDO_OK=true
@@ -91,7 +92,7 @@ else
     warn "sudo gak available. APT install di-skip semua."
 fi
 
-# Detect APT status — kalau update gagal, tetap coba install (package mungkin di local cache)
+# Detect APT status
 APT_UPDATE_OK=true
 if [ "$SUDO_OK" = true ] && command_exists apt-get; then
     info "Ngecek status APT..."
@@ -101,19 +102,13 @@ if [ "$SUDO_OK" = true ] && command_exists apt-get; then
     fi
 fi
 
-# Repair dulu kalau APT OK (biar gak hang di sistem broken)
+# Repair dulu kalau APT OK
 if [ "$APT_UPDATE_OK" = true ] && [ "$SUDO_OK" = true ]; then
     info "Nyoba repair broken packages dulu (kalau ada)..."
     timeout 30 sudo dpkg --configure -a 2>/dev/null || warn "dpkg configure timeout/failed, skip"
     timeout 30 sudo apt-get install -f -y 2>/dev/null || warn "apt-get -f timeout/failed, skip"
 fi
 
-# Package yang dibutuhin:
-# python3, python3-pip, python3-tk  → Python runtime + tkinter (log_cleaner.py)
-# python-is-python3                 → biar 'python' ngepoint ke python3
-# sshpass                           → SSH automation (deploy_parkee.py) — APT ONLY
-# fzf                               → iterfzf dependency — APT ONLY
-# sisanya                           → utility dasar
 APT_DEPS=(
     "python3"
     "python3-pip"
@@ -136,7 +131,6 @@ INSTALLED_NEW=()
 ALREADY_INSTALLED=()
 FAILED_APT=()
 
-# APT_AVAILABLE: true kalau sudo + apt-get ada (tetap coba walau update gagal)
 APT_AVAILABLE=false
 if [ "$SUDO_OK" = true ] && command_exists apt-get; then
     APT_AVAILABLE=true
@@ -164,7 +158,6 @@ for pkg in "${APT_DEPS[@]}"; do
     fi
 done
 
-# Summary APT — info doang, bukan abort
 if [ ${#FAILED_APT[@]} -ne 0 ]; then
     echo ""
     warn "Package APT berikut gagal / di-skip (NON-FATAL):"
@@ -172,10 +165,8 @@ if [ ${#FAILED_APT[@]} -ne 0 ]; then
         warn "    - $p"
     done
     warn "Coba manual nanti: sudo apt-get install ${FAILED_APT[*]}"
-    warn "Note: sshpass & python3-tk cuma bisa via APT, gak ada pip-nya."
 fi
 
-# Fallback: kalau 'python' command gak ada tapi 'python3' ada, bikin symlink
 if ! command_exists python && command_exists python3; then
     warn "'python' command gak ada. Bikin symlink ke python3..."
     PYTHON3_PATH=$(command -v python3)
@@ -194,7 +185,6 @@ section "STEP 3/8 — CEK PYTHON RUNTIME"
 PYTHON_CMD=""
 PIP_CMD=""
 
-# Cari python yang valid, minimal 3.8
 for cmd in python3 python; do
     if command_exists "$cmd"; then
         PY_VERSION=$("$cmd" --version 2>&1 | grep -oP '\d+\.\d+' | head -1)
@@ -212,12 +202,9 @@ done
 
 if [ -z "$PYTHON_CMD" ]; then
     err "Python 3.8+ gak ketemu sama sekali!"
-    err "Install manual dulu: sudo apt-get install python3"
-    err "Installer berhenti di sini karena tanpa Python gak ada yang bisa jalan."
     exit 1
 fi
 
-# Cari pip
 for cmd in pip3 pip; do
     if command_exists "$cmd"; then
         PIP_CMD="$cmd"
@@ -233,7 +220,6 @@ if [ -z "$PIP_CMD" ]; then
         ok "pip jalan via: $PYTHON_CMD -m pip"
     else
         err "pip gak ada sama sekali. Installer berhenti."
-        err "Fix: sudo apt-get install python3-pip"
         exit 1
     fi
 fi
@@ -278,27 +264,24 @@ for file in "${FILES_TO_DOWNLOAD[@]}"; do
 done
 
 if [ ${#DOWNLOAD_FAILED[@]} -ne 0 ]; then
-    err "File berikut gagal diunduh:"
-    for f in "${DOWNLOAD_FAILED[@]}"; do
-        err "  - $f"
-    done
-    err "Server ${SERVER_IP}:${SERVER_PORT} bisa direach tapi file-nya bermasalah."
-    err "Cek serve.sh di server supeng — mungkin ada file yang missing di gasak-dist."
+    err "File berikut gagal diunduh dari server."
     exit 1
 fi
 
 ok "Semua komponen berhasil diunduh."
 
 # ─── STEP 6: ENROLLMENT & VAULT SECURING ──────────────────────
-info "[6/7] Menyiapkan Kriptografi Asymmetric Lokal..."
+section "STEP 6/8 — SECURING ENCRYPTED LOCAL VAULT"
+info "Menyiapkan Kriptografi Asymmetric Lokal..."
 
 mkdir -p "$HOME/.config/gasak"
 PRIV_KEY_PATH="$HOME/.config/gasak/id_rsa"
 PUB_KEY_PATH="$HOME/.config/gasak/id_rsa.pub"
 
-# Generate RSA Keypair murni pake OpenSSL (Anti-hang, super cepat <1 detik)
-if [ ! -f "$PRIV_KEY_PATH" ]; then
-    info "Generating new 2048-bit RSA keypair..."
+# Generate RSA Keypair murni via OpenSSL (100% aman dari hang background process)
+if [ ! -f "$PRIV_KEY_PATH" ] || [ ! -f "$PUB_KEY_PATH" ]; then
+    info "Generating new secure 2048-bit RSA keypair..."
+    rm -f "$PRIV_KEY_PATH" "$PUB_KEY_PATH"
     openssl genrsa -out "$PRIV_KEY_PATH" 2048 2>/dev/null
     openssl rsa -in "$PRIV_KEY_PATH" -pubout -out "$PUB_KEY_PATH" 2>/dev/null
     chmod 600 "$PRIV_KEY_PATH"
@@ -310,14 +293,14 @@ if [ ! -f "$PUB_KEY_PATH" ]; then
     exit 1
 fi
 
-# Escape isi public key PEM agar aman dikirim dalam format JSON string
+# Escape isi public key agar valid dilempar ke format json body string
 PUB_KEY_CONTENT=$(cat "$PUB_KEY_PATH" | tr '\n' ' ' | sed 's/  */ /g')
 
 info "Menghubungi Central Vault Server untuk mengunduh enkripsi secrets..."
 VAULT_RESPONSE=$(curl -s -X POST \
   -H "Content-Type: application/json" \
-  -d "{\"token\":\"${GASAK_DIST_TOKEN:-}\", \"public_key\":\"${PUB_KEY_CONTENT}\"}" \
-  "http://10.70.0.110:9002/getenv")
+  -d "{\"token\":\"${GASAK_DIST_TOKEN}\", \"public_key\":\"${PUB_KEY_CONTENT}\"}" \
+  "http://${SERVER_IP}:${VAULT_PORT}/getenv")
 
 if echo "$VAULT_RESPONSE" | grep -q "encrypted_key"; then
     echo "$VAULT_RESPONSE" > "$HOME/.config/gasak/vault"
@@ -337,11 +320,6 @@ info "Python: $($PYTHON_CMD --version 2>&1)"
 info "pip   : $($PIP_CMD --version 2>&1 | head -1)"
 echo ""
 
-# Package breakdown per script:
-# deploy_parkee.py    → requests, questionary, iterfzf, rich
-# settlement_rfs.py   → psycopg2-binary, requests
-# decode_and_merge.py → stdlib only (json, argparse, urllib, pathlib, time)
-# log_cleaner.py      → stdlib only (tkinter via APT, os, re, shutil, threading)
 PIP_PACKAGES=(
     "psycopg2-binary"
     "requests"
@@ -350,9 +328,6 @@ PIP_PACKAGES=(
     "rich"
 )
 
-# Strategi install berlapis buat handle semua kondisi:
-# Ubuntu 22+ / Debian 12+ = butuh --break-system-packages
-# Sistem lama = --user doang udah cukup
 pip_install_with_fallback() {
     local package="$1"
     local strategies=(
@@ -383,33 +358,21 @@ for pkg in "${PIP_PACKAGES[@]}"; do
     fi
 done
 
-if [ ${#PIP_FAILED[@]} -ne 0 ]; then
-    echo ""
-    warn "Module pip berikut gagal install:"
-    for p in "${PIP_FAILED[@]}"; do
-        warn "    - $p"
-    done
-    warn "Coba install manual: pip3 install ${PIP_FAILED[*]}"
-fi
-
-# Pastiin ~/.local/bin ada di PATH buat sesi ini
+# Pastiin ~/.local/bin masuk PATH biar pip package kepanggil
 LOCAL_BIN="$HOME/.local/bin"
 if [ -d "$LOCAL_BIN" ] && [[ ":$PATH:" != *":$LOCAL_BIN:"* ]]; then
     export PATH="$LOCAL_BIN:$PATH"
 fi
 
-# Verifikasi import — buat ngecek apakah semua module bisa dipake
 echo ""
 info "Verifikasi import module..."
-IMPORT_FAILED=()
 MODULES_TO_CHECK=("psycopg2" "requests" "questionary" "iterfzf" "rich" "tkinter")
 
 for mod in "${MODULES_TO_CHECK[@]}"; do
     if $PYTHON_CMD -c "import $mod" 2>/dev/null; then
         ok "import ${mod} — OK"
     else
-        warn "import ${mod} — GAGAL (cek summary bawah)"
-        IMPORT_FAILED+=("$mod")
+        warn "import ${mod} — GAGAL"
     fi
 done
 
@@ -423,12 +386,10 @@ chmod 755 "${INSTALL_DIR}/gasak"
 chmod 644 "${INSTALL_DIR}/"*.py  2>/dev/null || true
 chmod 644 "${INSTALL_DIR}/version.txt" 2>/dev/null || true
 chmod 644 "${INSTALL_DIR}/server.properties" 2>/dev/null || true
-chmod 600 "${INSTALL_DIR}/.env"
+[ -f "$ENV_PATH" ] && chmod 600 "$ENV_PATH" || true
 ok "Permissions set."
 
-# Setup alias, PATH, dan auto-load .env ke semua shell profile yang ada
 info "Daftarin alias & PATH ke shell profiles..."
-
 ALIAS_LINE="alias gasak='${INSTALL_DIR}/gasak'"
 PATH_LINE="export PATH=\"\$HOME/.local/bin:\$PATH\""
 
@@ -440,54 +401,27 @@ SHELL_PROFILES=()
 
 for profile in "${SHELL_PROFILES[@]}"; do
     PROFILE_CHANGED=false
-
-    # 1. PATH ~/.local/bin
     if ! grep -q "\.local/bin" "$profile" 2>/dev/null; then
         echo "" >> "$profile"
-        echo "# GASAK: ~/.local/bin ke PATH (pip --user packages)" >> "$profile"
+        echo "# GASAK: PATH ~/.local/bin" >> "$profile"
         echo "$PATH_LINE" >> "$profile"
         PROFILE_CHANGED=true
     fi
-
-    # 2. Alias gasak
     if ! grep -q "alias gasak=" "$profile" 2>/dev/null; then
         echo "" >> "$profile"
         echo "# GASAK Toolchain" >> "$profile"
         echo "$ALIAS_LINE" >> "$profile"
         PROFILE_CHANGED=true
-    else
-        sed -i "s|alias gasak=.*|${ALIAS_LINE}|g" "$profile"
     fi
-
-    # 3. Auto-load .env waktu shell start
     if ! grep -q "gasak-dist/.env" "$profile" 2>/dev/null; then
         echo "" >> "$profile"
         echo "# GASAK: auto-load env vars" >> "$profile"
         echo "[ -f \"${ENV_PATH}\" ] && set -a && source \"${ENV_PATH}\" && set +a" >> "$profile"
         PROFILE_CHANGED=true
     fi
-
-    if [ "$PROFILE_CHANGED" = true ]; then
-        ok "Profile diupdate: ${profile}"
-    else
-        info "Udah lengkap, skip: ${profile}"
-    fi
+    if [ "$PROFILE_CHANGED" = true ]; then ok "Profile updated: ${profile}"; fi
 done
 
-# Fish shell — syntax beda
-FISH_CONFIG="$HOME/.config/fish/config.fish"
-if command_exists fish && [ -f "$FISH_CONFIG" ]; then
-    info "Fish shell ketemu! Setup config.fish..."
-    if ! grep -q "alias gasak" "$FISH_CONFIG" 2>/dev/null; then
-        echo "" >> "$FISH_CONFIG"
-        echo "# GASAK Toolchain" >> "$FISH_CONFIG"
-        echo "alias gasak='${INSTALL_DIR}/gasak'" >> "$FISH_CONFIG"
-        echo "fish_add_path \$HOME/.local/bin" >> "$FISH_CONFIG"
-        ok "Fish alias didaftarkan di ${FISH_CONFIG}"
-    fi
-fi
-
-# Aktifin alias langsung di sesi ini biar gak perlu reload dulu buat pertama kali
 eval "$ALIAS_LINE" 2>/dev/null || true
 export PATH="$HOME/.local/bin:$PATH"
 
@@ -496,77 +430,13 @@ export PATH="$HOME/.local/bin:$PATH"
 # ══════════════════════════════════════════════════════════════
 echo ""
 echo -e "${CYAN}════════════════════════════════════════════════════════════${RESET}"
-echo -e "${GREEN}${BOLD}  GASAK BERHASIL DIINSTALL                                  ${RESET}"
+echo -e "${GREEN}${BOLD}  GASAK BERHASIL DIINSTALL MURNI & AMAN!                     ${RESET}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════${RESET}"
 echo ""
-
-GASAK_VER=$(cat "${INSTALL_DIR}/version.txt" 2>/dev/null | tr -d '[:space:]' || echo "unknown")
-
-echo -e "  ${BOLD}[ INFO ]${RESET}"
-echo -e "  ├─ Lokasi     : ${CYAN}${INSTALL_DIR}${RESET}"
-echo -e "  ├─ Versi      : ${GREEN}${GASAK_VER}${RESET}"
-echo -e "  ├─ Python     : ${GREEN}$($PYTHON_CMD --version 2>&1)${RESET}"
-echo -e "  └─ pip        : ${GREEN}$($PIP_CMD --version 2>&1 | head -1)${RESET}"
+echo -e "  Silakan reload shell lu men:"
+echo -e "  ${CYAN}source ~/.zshrc${RESET} atau ${CYAN}source ~/.bashrc${RESET}"
 echo ""
-
-echo -e "  ${BOLD}[ SYSTEM TOOLS ]${RESET}"
-for tool in sshpass fzf rsync curl; do
-    if command_exists "$tool"; then
-        echo -e "  ├─ ${tool:<10} : ${GREEN}✔ ready${RESET}"
-    else
-        echo -e "  ├─ ${tool:<10} : ${RED}✘ missing — menu terkait akan error${RESET}"
-    fi
-done
-echo ""
-
-echo -e "  ${BOLD}[ PYTHON MODULES ]${RESET}"
-for mod in psycopg2 requests questionary iterfzf rich tkinter; do
-    if $PYTHON_CMD -c "import $mod" 2>/dev/null; then
-        echo -e "  ├─ ${mod:<15} : ${GREEN}✔ ok${RESET}"
-    else
-        echo -e "  ├─ ${mod:<15} : ${RED}✘ missing${RESET}"
-    fi
-done
-echo ""
-
-echo -e "  ${BOLD}[ .ENV KEYS ]${RESET}"
-for key in GLPI_URL OUTLINE_URL OUTLINE_API_KEY LINEAR_API_KEY \
-           PARKEE_SSH_USER PARKEE_SSH_PASS \
-           CMS_DB_HOST CMS_DB_PORT CMS_DB_USER CMS_DB_PASS CMS_DB_NAME; do
-    if grep -q "^${key}=" "$ENV_PATH" 2>/dev/null; then
-        echo -e "  ├─ ${key:<20} : ${GREEN}✔${RESET}"
-    else
-        echo -e "  ├─ ${key:<20} : ${RED}✘ MISSING!${RESET}"
-    fi
-done
-echo ""
-
-# Kalau ada APT yang miss, remind di sini juga
-if [ ${#FAILED_APT[@]} -ne 0 ]; then
-    echo -e "  ${BOLD}[ APT YANG GAGAL — PERLU PERHATIAN ]${RESET}"
-    for p in "${FAILED_APT[@]}"; do
-        echo -e "  ├─ ${RED}${p}${RESET}"
-    done
-    echo -e "  └─ ${YELLOW}Fix: sudo apt-get install ${FAILED_APT[*]}${RESET}"
-    echo ""
-fi
-
-# Info kalau APT update gagal tapi tetap jalan
-if [ "$APT_UPDATE_OK" = false ]; then
-    warn "Note: apt-get update gagal, tapi package tetap dicoba install dari cache."
-fi
-
-echo -e "${CYAN}════════════════════════════════════════════════════════════${RESET}"
-echo -e "  ${YELLOW}${BOLD}Reload terminal dulu biar alias & env aktif!${RESET}"
-echo ""
-echo -e "  Pilih salah satu:"
-echo -e "    ${CYAN}source ~/.bashrc${RESET}   ← kalau bash"
-echo -e "    ${CYAN}source ~/.zshrc${RESET}    ← kalau zsh"
-echo -e "    ${CYAN}exec fish${RESET}          ← kalau fish"
-echo ""
-echo -e "  Atau close & buka terminal baru. Abis itu:"
+echo -e "  Setelah itu, langsung ketik perintah sakti:"
 echo -e "  ${GREEN}${BOLD}  gasak${RESET}"
-echo ""
 echo -e "${CYAN}════════════════════════════════════════════════════════════${RESET}"
-ENDOFFILE
-echo "DONE"
+echo ""
