@@ -111,7 +111,7 @@ func loadVault() (*VaultSecrets, error) {
 		return nil, err
 	}
 
-	if _, err := os.stat(vaultPath); os.IsNotExist(err) {
+	if _, err := os.Stat(vaultPath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("vault file tidak ditemukan")
 	}
 
