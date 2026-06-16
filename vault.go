@@ -174,4 +174,20 @@ func loadVault() (*VaultSecrets, error) {
 }
 
 func applyVaultSecrets(s *VaultSecrets) {
-	envMap := map[string]string{\n\t\t\"GLPI_URL\":        s.GLPIUrl,\n\t\t\"OUTLINE_URL\":     s.OutlineURL,\n\t\t\"OUTLINE_API_KEY\": s.OutlineAPIKey,\n\t\t\"LINEAR_API_KEY\":  s.LinearAPIKey,\n\t\t\"PARKEE_SSH_USER\": s.SshUser,\n\t\t\"PARKEE_SSH_PASS\": s.SshPass,\n\t\t\"CMS_DB_HOST\":     s.CmsDbHost,\n\t\t\"CMS_DB_PORT\":     s.CmsDbPort,\n\t\t\"CMS_DB_USER\":     s.CmsDbUser,\n\t\t\"CMS_DB_PASS\":     s.CmsDbPass,\n\t\t\"CMS_DB_NAME\":     s.CmsDbName,\n\t}\n\tfor k, v := range envMap {\n\t\t_ = os.Setenv(k, v)\n\t}\n}
+	envMap := map[string]string{
+		"GLPI_URL":        s.GLPIUrl,
+		"OUTLINE_URL":     s.OutlineURL,
+		"OUTLINE_API_KEY": s.OutlineAPIKey,
+		"LINEAR_API_KEY":  s.LinearAPIKey,
+		"PARKEE_SSH_USER": s.SshUser,
+		"PARKEE_SSH_PASS": s.SshPass,
+		"CMS_DB_HOST":     s.CmsDbHost,
+		"CMS_DB_PORT":     s.CmsDbPort,
+		"CMS_DB_USER":     s.CmsDbUser,
+		"CMS_DB_PASS":     s.CmsDbPass,
+		"CMS_DB_NAME":     s.CmsDbName,
+	}
+	for k, v := range envMap {
+		_ = os.Setenv(k, v)
+	}
+}
