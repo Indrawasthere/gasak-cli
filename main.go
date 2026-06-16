@@ -1648,22 +1648,22 @@ type GateInfo struct {
 // queryGatesFromDB SSH ke server main, query postgres, return list gate (yang aktif doang tapi)
 func queryGatesFromDB(tpUser *TeleportUser, loc *Location) ([]GateInfo, error) {
 	uni := strings.ToLower(loc.Unicode)
+	dbName := "agent_" + uni // Merakit nama database langsung lewat variabel aman
 
-	// Cloning query dari sshp: ambil user_pc + ip terbaru per gate (ranked by created_at DESC) tapi cuma ambil nama sama ip aja
-	// Filter yang sama buat location lookup, pake unique_code dari tabel location biar cuma gate lokasi ini yang keambil
-	// Enhanced: pake format Heredoc (<<'EOF') biar aman di-pass via SSH tanpa masalah quoting bash atau cuma ngintip value tanpa gather postgre session
-	query := fmt.Sprintf(`psql -h localhost -U agent -d agent_%s -t -A -F'|' <<'EOF'
+	// Menggunakan string concatenation murni untuk dbName,
+	// sehingga string literal Postgre ('31 days') aman tanpa perlu escape Sprintf
+	rawSQL := `psql -h localhost -U agent -d ` + dbName + ` -t -A -F'|' <<'EOF'
 SELECT DISTINCT ON (user_pc) user_pc, ip_address
 FROM (
     SELECT user_pc, ip_address, created_at
     FROM core_user_activity
-    WHERE lower(user_pc) LIKE '%%' || (SELECT lower(unique_code) FROM location) || '%%'
+    WHERE lower(user_pc) LIKE '%' || (SELECT lower(unique_code) FROM location) || '%'
       AND deleted_at IS NULL
       AND action_type = 'LOGIN'
       AND created_at >= NOW() - INTERVAL '31 days'
 ) AS get_data
 ORDER BY user_pc, created_at DESC;
-EOF`, uni)
+EOF`
 
 	var out []byte
 	var err error
@@ -1672,7 +1672,7 @@ EOF`, uni)
 		nodeName := nodeNameFromUnicode(loc.Unicode)
 		cmd := exec.Command("tsh", "ssh",
 			fmt.Sprintf("%s@%s", nodeName, nodeName),
-			query,
+			rawSQL,
 		)
 		out, err = cmd.Output()
 	} else {
@@ -1681,13 +1681,13 @@ EOF`, uni)
 			"-o", "StrictHostKeyChecking=no",
 			"-o", "ConnectTimeout=5",
 			fmt.Sprintf("support@%s", loc.IP),
-			query,
+			rawSQL,
 		)
 		out, err = cmd.Output()
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("Fetching data gate gagal nich: %w", err)
+		return nil, fmt.Errorf("Fetching data gate gagal nich: %w (output: %s)", err, string(out))
 	}
 
 	raw := strings.TrimSpace(string(out))
