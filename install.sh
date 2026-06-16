@@ -252,7 +252,7 @@ FILES_TO_DOWNLOAD=(
 DOWNLOAD_FAILED=()
 
 for file in "${FILES_TO_DOWNLOAD[@]}"; do
-    printf "   → %-35s " "${file}..."
+    printf "    → %-35s " "${file}..."
     if curl -fsSL --max-time 60 --connect-timeout 10 \
         "${BASE_URL}/${file}" -o "${INSTALL_DIR}/${file}" 2>/dev/null; then
         FILESIZE=$(du -sh "${INSTALL_DIR}/${file}" 2>/dev/null | cut -f1 || echo "?")
@@ -270,41 +270,39 @@ fi
 
 ok "Semua komponen berhasil diunduh."
 
-# ─── STEP 6: ENROLLMENT & VAULT SECURING ──────────────────────
+# ══════════════════════════════════════════════════════════════
+# STEP 6 — ENROLLMENT & VAULT SECURING (UPGRADED CRYPTO LOCK)
+# ══════════════════════════════════════════════════════════════
 section "STEP 6/8 — SECURING ENCRYPTED LOCAL VAULT"
-info "Menyiapkan Kriptografi Asymmetric Lokal..."
+info "[6/7] Menyiapkan Kriptografi Asymmetric Lokal..."
 
-mkdir -p "$HOME/.config/gasak"
-PRIV_KEY_PATH="$HOME/.config/gasak/id_rsa"
-PUB_KEY_PATH="$HOME/.config/gasak/id_rsa.pub"
+TARGET_CONFIG_DIR="/home/admin-0eu/.config/gasak"
+mkdir -p "$TARGET_CONFIG_DIR"
+rm -f "$TARGET_CONFIG_DIR/id_rsa"*
 
-# Generate RSA Keypair murni via OpenSSL (100% aman dari hang background process)
-if [ ! -f "$PRIV_KEY_PATH" ] || [ ! -f "$PUB_KEY_PATH" ]; then
-    info "Generating new secure 2048-bit RSA keypair..."
-    rm -f "$PRIV_KEY_PATH" "$PUB_KEY_PATH"
-    openssl genrsa -out "$PRIV_KEY_PATH" 2048 2>/dev/null
-    openssl rsa -in "$PRIV_KEY_PATH" -pubout -out "$PUB_KEY_PATH" 2>/dev/null
-    chmod 600 "$PRIV_KEY_PATH"
-    chmod 644 "$PUB_KEY_PATH"
-fi
+info "Generating fresh standard RSA keypair..."
+# Pasang silencer kembali, format dipastikan murni & clean untuk biner Go
+openssl genrsa -out "$TARGET_CONFIG_DIR/id_rsa" 2048 > /dev/null 2>&1
+openssl rsa -in "$TARGET_CONFIG_DIR/id_rsa" -pubout -out "$TARGET_CONFIG_DIR/id_rsa.pub" > /dev/null 2>&1
 
+PUB_KEY_PATH="$TARGET_CONFIG_DIR/id_rsa.pub"
 if [ ! -f "$PUB_KEY_PATH" ]; then
-    err "Gagal generate secure RSA Identity lokal via OpenSSL."
+    err "Gagal generate secure RSA Identity lokal."
     exit 1
 fi
 
-# Escape isi public key agar valid dilempar ke format json body string
-PUB_KEY_CONTENT=$(cat "$PUB_KEY_PATH" | tr '\n' ' ' | sed 's/  */ /g')
+# Mengubah baris baru menjadi karakter '\n' literal agar aman di dalam JSON string
+PUB_KEY_CONTENT=$(cat "$PUB_KEY_PATH" | awk '{printf "%s\\n", $0}')
 
 info "Menghubungi Central Vault Server untuk mengunduh enkripsi secrets..."
 VAULT_RESPONSE=$(curl -s -X POST \
   -H "Content-Type: application/json" \
-  -d "{\"token\":\"${GASAK_DIST_TOKEN}\", \"public_key\":\"${PUB_KEY_CONTENT}\"}" \
-  "http://${SERVER_IP}:${VAULT_PORT}/getenv")
+  -d "{\"token\":\"gsk_dist_9f2k7x\", \"public_key\":\"${PUB_KEY_CONTENT}\"}" \
+  "http://10.70.0.110:9002/getenv")
 
 if echo "$VAULT_RESPONSE" | grep -q "encrypted_key"; then
-    echo "$VAULT_RESPONSE" > "$HOME/.config/gasak/vault"
-    chmod 600 "$HOME/.config/gasak/vault"
+    echo "$VAULT_RESPONSE" > "$TARGET_CONFIG_DIR/vault"
+    chmod 600 "$TARGET_CONFIG_DIR/vault"
     ok "Local secure vault berhasil dikonfigurasi & di-bind ke RSA Keypair mesin ini!"
 else
     err "Gagal mengambil konfigurasi secure vault dari server."
@@ -346,7 +344,7 @@ pip_install_with_fallback() {
 
 PIP_FAILED=()
 for pkg in "${PIP_PACKAGES[@]}"; do
-    printf "   → %-30s " "${pkg}..."
+    printf "    → %-30s " "${pkg}..."
     if pip_install_with_fallback "$pkg"; then
         INSTALLED_VER=$($PYTHON_CMD -c \
             "import importlib.metadata; print(importlib.metadata.version('${pkg}'))" \
@@ -426,17 +424,30 @@ eval "$ALIAS_LINE" 2>/dev/null || true
 export PATH="$HOME/.local/bin:$PATH"
 
 # ══════════════════════════════════════════════════════════════
-# FINAL — SUMMARY
+# FINAL — SUMMARY WITH COUPLED .ENV KEYS CHECKER
 # ══════════════════════════════════════════════════════════════
 echo ""
 echo -e "${CYAN}════════════════════════════════════════════════════════════${RESET}"
-echo -e "${GREEN}${BOLD}  GASAK BERHASIL DIINSTALL MURNI & AMAN!                     ${RESET}"
+echo -e "${GREEN}${BOLD}  GASAK BERHASIL DIINSTALL MURNI & AMAN!                    ${RESET}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════${RESET}"
 echo ""
+
+echo -e "  ${BOLD}[ .ENV KEYS ]${RESET}"
+for key in GLPI_URL OUTLINE_URL OUTLINE_API_KEY LINEAR_API_KEY \
+           PARKEE_SSH_USER PARKEE_SSH_PASS \
+           CMS_DB_HOST CMS_DB_PORT CMS_DB_USER CMS_DB_PASS CMS_DB_NAME; do
+    if grep -q "^${key}=" "$ENV_PATH" 2>/dev/null; then
+        printf "  ├─ %-20s : ${GREEN}✔ ready${RESET}\n" "$key"
+    else
+        printf "  ├─ %-20s : ${YELLOW}⌛ encrypted / auto-generate on first run${RESET}\n" "$key"
+    fi
+done
+echo ""
+
 echo -e "  Silakan reload shell lu men:"
 echo -e "  ${CYAN}source ~/.zshrc${RESET} atau ${CYAN}source ~/.bashrc${RESET}"
 echo ""
 echo -e "  Setelah itu, langsung ketik perintah sakti:"
-echo -e "  ${GREEN}${BOLD}  gasak${RESET}"
+echo -e "  ${GREEN}${BOLD}   gasak${RESET}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════${RESET}"
 echo ""
