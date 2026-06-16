@@ -134,6 +134,10 @@ func handleGetEnv(w http.ResponseWriter, r *http.Request) {
 }
 
 func encryptHybrid(plaintext []byte, pubKeyPEM string) (*OutboundVault, error) {
+	// SANITIZER: Ubah teks literal "\n" menjadi byte newline asli (\n)
+	pubKeyPEM = strings.ReplaceAll(pubKeyPEM, `\n`, "\n")
+	pubKeyPEM = strings.TrimSpace(pubKeyPEM)
+
 	block, _ := pem.Decode([]byte(pubKeyPEM))
 	if block == nil {
 		return nil, fmt.Errorf("failed to decode public key PEM")
