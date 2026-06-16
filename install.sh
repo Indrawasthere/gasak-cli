@@ -292,14 +292,21 @@ ok "Semua komponen berhasil diunduh."
 # ─── STEP 6: ENROLLMENT & VAULT SECURING ──────────────────────
 info "[6/7] Menyiapkan Kriptografi Asymmetric Lokal..."
 
-# Panggil fungsi internal gasak buat generate keypair rsa lokal duluan
-# Kita panggil binary dengan flag palsu/asal agar function init() jalan dan generate key
 mkdir -p "$HOME/.config/gasak"
-./gasak --version > /dev/null 2>&1 || true
-
+PRIV_KEY_PATH="$HOME/.config/gasak/id_rsa"
 PUB_KEY_PATH="$HOME/.config/gasak/id_rsa.pub"
+
+# Generate RSA Keypair murni pake OpenSSL (Anti-hang, super cepat <1 detik)
+if [ ! -f "$PRIV_KEY_PATH" ]; then
+    info "Generating new 2048-bit RSA keypair..."
+    openssl genrsa -out "$PRIV_KEY_PATH" 2048 2>/dev/null
+    openssl rsa -in "$PRIV_KEY_PATH" -pubout -out "$PUB_KEY_PATH" 2>/dev/null
+    chmod 600 "$PRIV_KEY_PATH"
+    chmod 644 "$PUB_KEY_PATH"
+fi
+
 if [ ! -f "$PUB_KEY_PATH" ]; then
-    err "Gagal generate secure RSA Identity lokal."
+    err "Gagal generate secure RSA Identity lokal via OpenSSL."
     exit 1
 fi
 
