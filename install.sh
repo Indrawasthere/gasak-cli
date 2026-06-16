@@ -289,74 +289,36 @@ fi
 
 ok "Semua komponen berhasil diunduh."
 
-# ══════════════════════════════════════════════════════════════
-# STEP 6 — FETCH .ENV DARI SERVER DISTRIBUSI
-# ══════════════════════════════════════════════════════════════
-section "STEP 6/8 — FETCH CREDENTIALS DARI SERVER"
+# ─── STEP 6: ENROLLMENT & VAULT SECURING ──────────────────────
+info "[6/7] Menyiapkan Kriptografi Asymmetric Lokal..."
 
-# Token distribusi — bukan credentials, ini cuma kunci buat ambil .env dari server.
-# Useless tanpa akses ZeroTier subnet 10.70.x.x (layer 1 security).
-DIST_TOKEN="gsk_dist_9f2k7x"
+# Panggil fungsi internal gasak buat generate keypair rsa lokal duluan
+# Kita panggil binary dengan flag palsu/asal agar function init() jalan dan generate key
+mkdir -p "$HOME/.config/gasak"
+./gasak --version > /dev/null 2>&1 || true
 
-# Backup .env lama kalau ada — jangan langsung timpah
-if [ -f "$ENV_PATH" ]; then
-    cp "$ENV_PATH" "${ENV_PATH}.bak"
-    warn ".env lama dibackup ke: ${ENV_PATH}.bak"
-fi
-
-info "Fetching credentials dari server distribusi..."
-info "(Credentials tidak ditulis di installer — diambil langsung dari server)"
-
-# Fetch .env dari endpoint /getenv — server validasi token sebelum serve
-HTTP_STATUS=$(curl -fsSL \
-    --max-time 15 \
-    --connect-timeout 5 \
-    -w "%{http_code}" \
-    "${BASE_URL}/getenv?token=${DIST_TOKEN}" \
-    -o "${ENV_PATH}" \
-    2>/dev/null)
-
-if [ "$HTTP_STATUS" != "200" ]; then
-    # Bersihkan file kalau gagal — jangan simpen response error sebagai .env
-    rm -f "${ENV_PATH}"
-    # Restore backup kalau ada
-    if [ -f "${ENV_PATH}.bak" ]; then
-        mv "${ENV_PATH}.bak" "${ENV_PATH}"
-        warn ".env lama di-restore dari backup."
-    fi
-    err "Gagal fetch credentials dari server (HTTP ${HTTP_STATUS})."
-    err "Kemungkinan penyebab:"
-    err "  1. Server supeng (${SERVER_IP}) belum restart serve.sh setelah update"
-    err "  2. Token distribusi tidak valid"
-    err "  3. Koneksi ZeroTier putus di tengah jalan"
+PUB_KEY_PATH="$HOME/.config/gasak/id_rsa.pub"
+if [ ! -f "$PUB_KEY_PATH" ]; then
+    err "Gagal generate secure RSA Identity lokal."
     exit 1
 fi
 
-chmod 600 "${ENV_PATH}"
-ok "Credentials berhasil di-fetch & dikunci (permission 600): ${ENV_PATH}"
+# Escape isi public key PEM agar aman dikirim dalam format JSON string
+PUB_KEY_CONTENT=$(cat "$PUB_KEY_PATH" | tr '\n' ' ' | sed 's/  */ /g')
 
-# Verifikasi semua key ada di .env yang baru di-fetch
-REQUIRED_KEYS=(
-    "GLPI_URL" "OUTLINE_URL"
-    "OUTLINE_API_KEY" "LINEAR_API_KEY"
-    "PARKEE_SSH_USER" "PARKEE_SSH_PASS"
-    "CMS_DB_HOST" "CMS_DB_PORT" "CMS_DB_USER" "CMS_DB_PASS" "CMS_DB_NAME"
-)
+info "Menghubungi Central Vault Server untuk mengunduh enkripsi secrets..."
+VAULT_RESPONSE=$(curl -s -X POST \
+  -H "Content-Type: application/json" \
+  -d "{\"token\":\"${GASAK_DIST_TOKEN:-}\", \"public_key\":\"${PUB_KEY_CONTENT}\"}" \
+  "http://10.70.0.110:9002/getenv")
 
-ENV_OK=true
-for key in "${REQUIRED_KEYS[@]}"; do
-    if grep -q "^${key}=" "$ENV_PATH" 2>/dev/null; then
-        ok ".env key OK: ${key}"
-    else
-        err ".env MISSING KEY: ${key} — server mungkin serve .env yang outdated"
-        ENV_OK=false
-    fi
-done
-
-if [ "$ENV_OK" = false ]; then
-    err "Ada key yang hilang di .env yang di-fetch!"
-    err "Pastiin .env di server supeng (~/gasak-dist/.env) sudah lengkap."
-    err "Cek file di server: cat ~/gasak-dist/.env"
+if echo "$VAULT_RESPONSE" | grep -q "encrypted_key"; then
+    echo "$VAULT_RESPONSE" > "$HOME/.config/gasak/vault"
+    chmod 600 "$HOME/.config/gasak/vault"
+    ok "Local secure vault berhasil dikonfigurasi & di-bind ke RSA Keypair mesin ini!"
+else
+    err "Gagal mengambil konfigurasi secure vault dari server."
+    echo -e "${RED}Server Response: ${VAULT_RESPONSE}${RESET}"
     exit 1
 fi
 

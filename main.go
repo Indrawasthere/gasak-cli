@@ -44,18 +44,32 @@ var (
 )
 
 func init() {
-	home, _ := os.UserHomeDir()
-	locations := []string{
-		".env",
-		filepath.Join(home, "gasak-dist", ".env"),
-		filepath.Join(home, ".env"),
+	// ── Priority 1: GASAK Vault (encrypted local vault) ──────────
+	// Ini path utama — secret dienkripsi pake machine-id, gak ada plaintext di disk
+	vaultLoaded := false
+	if secrets, err := loadVault(); err == nil {
+		applyVaultSecrets(secrets)
+		vaultLoaded = true
 	}
-	for _, loc := range locations {
-		if err := godotenv.Load(loc); err == nil {
-			break
+
+	// ── Priority 2: .env fallback ─────────────────────────────────
+	// Fallback buat backward compatibility — engineer yang belum
+	// curl ulang installer setelah vault rollout tetap bisa jalan
+	if !vaultLoaded {
+		home, _ := os.UserHomeDir()
+		locations := []string{
+			".env",
+			filepath.Join(home, "gasak-dist", ".env"),
+			filepath.Join(home, ".env"),
+		}
+		for _, loc := range locations {
+			if err := godotenv.Load(loc); err == nil {
+				break
+			}
 		}
 	}
 
+	// ── Load ke global vars ───────────────────────────────────────
 	GLPIUrl = os.Getenv("GLPI_URL")
 	OutlineURL = os.Getenv("OUTLINE_URL")
 	OutlineAPIKey = os.Getenv("OUTLINE_API_KEY")
