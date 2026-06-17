@@ -133,9 +133,8 @@ class GasakDistHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
 
             with open(filepath, 'rb') as f:
-                # Stream dalam chunk biar aman untuk file besar (binary gasak)
                 while True:
-                    chunk = f.read(65536)
+                    chunk = f.read(1048576)
                     if not chunk:
                         break
                     self.wfile.write(chunk)
