@@ -174,20 +174,29 @@ func loadVault() (*VaultSecrets, error) {
 }
 
 func applyVaultSecrets(s *VaultSecrets) {
-	envMap := map[string]string{
-		"GLPI_URL":        s.GLPIUrl,
-		"OUTLINE_URL":     s.OutlineURL,
-		"OUTLINE_API_KEY": s.OutlineAPIKey,
-		"LINEAR_API_KEY":  s.LinearAPIKey,
-		"PARKEE_SSH_USER": s.SshUser,
-		"PARKEE_SSH_PASS": s.SshPass,
-		"CMS_DB_HOST":     s.CmsDbHost,
-		"CMS_DB_PORT":     s.CmsDbPort,
-		"CMS_DB_USER":     s.CmsDbUser,
-		"CMS_DB_PASS":     s.CmsDbPass,
-		"CMS_DB_NAME":     s.CmsDbName,
-	}
-	for k, v := range envMap {
-		_ = os.Setenv(k, v)
-	}
+	// 1. Set ke OS Environment (buat dibaca script Python)
+	os.Setenv("GLPI_URL", s.GLPIUrl)
+	os.Setenv("OUTLINE_URL", s.OutlineURL)
+	os.Setenv("OUTLINE_API_KEY", s.OutlineAPIKey)
+	os.Setenv("LINEAR_API_KEY", s.LinearAPIKey)
+	os.Setenv("PARKEE_SSH_USER", s.SshUser)
+	os.Setenv("PARKEE_SSH_PASS", s.SshPass)
+	os.Setenv("CMS_DB_HOST", s.CmsDbHost)
+	os.Setenv("CMS_DB_PORT", s.CmsDbPort)
+	os.Setenv("CMS_DB_USER", s.CmsDbUser)
+	os.Setenv("CMS_DB_PASS", s.CmsDbPass)
+	os.Setenv("CMS_DB_NAME", s.CmsDbName)
+
+	// 2. KUNCI UTAMA: Assign balik ke variabel global project Go lu men!
+	GLPIUrl = s.GLPIUrl
+	OutlineURL = s.OutlineURL
+	OutlineAPIKey = s.OutlineAPIKey
+	LinearAPIKey = s.LinearAPIKey
+	SshPass = s.SshPass // Pastikan variabel global SshPass atau SshPass internal lu terisi
+
+	CmsDbHost = s.CmsDbHost
+	CmsDbPort = s.CmsDbPort
+	CmsDbUser = s.CmsDbUser
+	CmsDbPass = s.CmsDbPass
+	CmsDbName = s.CmsDbName
 }
