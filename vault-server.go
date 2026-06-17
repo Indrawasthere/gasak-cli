@@ -4,6 +4,7 @@ package main
 // GASAK VAULT SERVER — HYBRID SECURITY ENGINE
 // Port: 9002 di Server Supeng
 // Menerima Public Key Client via HTTP, Melakukan Hybrid Encryption
+// Dan Menyediakan Endpoint API Terpusat untuk Ambil Log Agent
 // ─────────────────────────────────────────────────────────────
 
 import (
@@ -13,6 +14,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -23,6 +25,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	_ "github.com/lib/pq" // Driver PostgreSQL untuk koneksi DB pusat
 )
 
 const (
@@ -53,6 +57,11 @@ type OutboundVault struct {
 	EncryptedKey string `json:"encrypted_key"`
 	Payload      string `json:"payload"`
 	Nonce        string `json:"nonce"`
+}
+
+type LocateResponse struct {
+	NamaLokasi string `json:"nama_lokasi"`
+	IPAddress  string `json:"ip_address"`
 }
 
 func main() {
@@ -181,48 +190,10 @@ func encryptHybrid(plaintext []byte, pubKeyPEM string) (*OutboundVault, error) {
 		return nil, fmt.Errorf("failed to envelope key: %w", err)
 	}
 
-	return &OutboundVault{
-		EncryptedKey: hex.EncodeToString(encryptedKey),
+	return &OutboundVault{\n\t\tEncryptedKey: hex.EncodeToString(encryptedKey),
 		Payload:      hex.EncodeToString(ciphertext),
 		Nonce:        hex.EncodeToString(nonce),
 	}, nil
-}
-
-func handleHealth(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "time": time.Now().Format(time.RFC3339)})
-}
-
-func logAccess(r *http.Request, status int, msg string) {
-	ip := r.RemoteAddr
-	if idx := strings.LastIndex(ip, ":"); idx != -1 {
-		ip = ip[:idx]
-	}
-	logStr := fmt.Sprintf("[%s] %s | %d | %s\n", time.Now().Format("2006-01-02 15:04:05"), ip, status, msg)
-	fmt.Print(logStr)
-	f, err := os.OpenFile(LogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err == nil {
-		defer f.Close()
-		_, _ = f.WriteString(logStr)
-	}
-}
-
-func getEnvDefault(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
-
-import (
-	"database/sql" // Pastikan library sql sudah di-import di atas berkas vault-server.go
-	_ "github.com/lib/pq" // Pastikan driver postgresql di-import di server pusat
-)
-
-type LocateResponse struct {
-	NamaLokasi string `json:"nama_lokasi"`
-	IPAddress  string `json:"ip_address"`
 }
 
 func handleLocateGate(w http.ResponseWriter, r *http.Request) {
@@ -233,6 +204,7 @@ func handleLocateGate(w http.ResponseWriter, r *http.Request) {
 	if token != "gsk_dist_9f2k7x" {
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Unauthorized men!"})
+		logAccess(r, 401, "UNAUTHORIZED GATE LOCATE REQUEST")
 		return
 	}
 
@@ -250,18 +222,21 @@ func handleLocateGate(w http.ResponseWriter, r *http.Request) {
 	dbPass := os.Getenv("CMS_DB_PASS")
 	dbName := os.Getenv("CMS_DB_NAME")
 
-	if dbPort == "" { dbPort = "5432" }
+	if dbPort == "" {
+		dbPort = "5432"
+	}
 
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable", dbHost, dbPort, dbUser, dbPass, dbName)
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Gagal konek DB pusat: " + err.Error()})
+		logAccess(r, 500, "DB CONN ERROR: "+err.Error())
 		return
 	}
 	defer db.Close()
 
-	// Query sakti dari lu yang udah dibungkus aman di server pusat
+	// Query pencarian data aktivitas login dari user
 	query := `
 		SELECT DISTINCT ON (user_pc)
 			user_pc AS nama_lokasi,
@@ -291,8 +266,36 @@ func handleLocateGate(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Lokasi tidak ditemukan atau data activity kosong 31 hari terakhir."})
+		logAccess(r, 404, "LOKASI TIDAK KETEMU: "+keyword)
 		return
 	}
 
 	_ = json.NewEncoder(w).Encode(resp)
+	logAccess(r, 200, "GATE LOCATED SUCCESSFULLY: "+resp.NamaLokasi)
+}
+
+func handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "time": time.Now().Format(time.RFC3339)})
+}
+
+func logAccess(r *http.Request, status int, msg string) {
+	ip := r.RemoteAddr
+	if idx := strings.LastIndex(ip, ":"); idx != -1 {
+		ip = ip[:idx]
+	}
+	logStr := fmt.Sprintf("[%s] %s | %d | %s\n", time.Now().Format("2006-01-02 15:04:05"), ip, status, msg)
+	fmt.Print(logStr)
+	f, err := os.OpenFile(LogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err == nil {
+		defer f.Close()
+		_, _ = f.WriteString(logStr)
+	}
+}
+
+func getEnvDefault(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }
