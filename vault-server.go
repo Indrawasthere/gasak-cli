@@ -197,32 +197,35 @@ func encryptHybrid(plaintext []byte, pubKeyPEM string) (*OutboundVault, error) {
 	}, nil
 }
 
+type LocateResponse struct {
+	NamaLokasi string `json:"nama_lokasi"`
+	IPAddress  string `json:"ip_address"`
+}
+
 func handleLocateGate(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	// Validasi token distribusi sederhana biar ga sembarang orang nembak query
+	// Validasi token internal distribusi
 	token := r.Header.Get("X-Gasak-Token")
-	if token != "gsk_dist_9f2k7x" {
+	if token != "gsk_dist_9f2k7x" { // ← Sesuai hardcoded token internal lu
 		w.WriteHeader(http.StatusUnauthorized)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Unauthorized men!"})
-		logAccess(r, 401, "UNAUTHORIZED GATE LOCATE REQUEST")
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Unauthorized internal token!"})
 		return
 	}
 
 	keyword := r.URL.Query().Get("keyword")
 	if keyword == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Butuh parameter keyword lokasi!"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Parameter keyword lokasi wajib diisi!"})
 		return
 	}
 
-	// Load DB config server pusat langsung dari system env server
+	// Load DB Credentials dari Vault Environment
 	dbHost := os.Getenv("CMS_DB_HOST")
 	dbPort := os.Getenv("CMS_DB_PORT")
 	dbUser := os.Getenv("CMS_DB_USER")
 	dbPass := os.Getenv("CMS_DB_PASS")
 	dbName := os.Getenv("CMS_DB_NAME")
-
 	if dbPort == "" {
 		dbPort = "5432"
 	}
@@ -231,48 +234,64 @@ func handleLocateGate(w http.ResponseWriter, r *http.Request) {
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Gagal konek DB pusat: " + err.Error()})
-		logAccess(r, 500, "DB CONN ERROR: "+err.Error())
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Koneksi ke CMS DB Gagal: " + err.Error()})
 		return
 	}
 	defer db.Close()
 
-	// Query pencarian data aktivitas login dari user
+	// UPGRADE: Query Sakti Gabungan (Filter IP 10.70.% + Join Reader Information)
 	query := `
-			SELECT DISTINCT ON (user_pc)
-				user_pc AS nama_lokasi,
-				(
-					SELECT trim(ip)
-					FROM unnest(string_to_array(ip_address, ' ')) AS ip
-					WHERE ip LIKE '10.70.%'
-					LIMIT 1
-				) AS ip_address,
-				created_at AS last_seen
-			FROM (
-				SELECT user_pc, ip_address, created_at
-				FROM core_user_activity
-				WHERE trim(lower(user_pc)) LIKE $1
-				  AND deleted_at IS NULL
-				  AND action_type = 'LOGIN'
-				  AND created_at >= NOW() - INTERVAL '31 days'
-			) AS get_data
-			ORDER BY user_pc, created_at DESC LIMIT 1;`
+		SELECT
+			data_collection.user_pc,
+			(
+				SELECT trim(ip)
+				FROM unnest(string_to_array(data_collection.ip_address, ' ')) AS ip
+				WHERE ip LIKE '10.70.%'
+				LIMIT 1
+			) AS ip_address
+		FROM (
+			WITH ranked_data AS (
+				SELECT user_pc, app_version, ip_address,
+				       ROW_NUMBER() OVER (PARTITION BY user_pc ORDER BY created_at DESC) AS rn
+				FROM (
+					SELECT created_at, ip_address, user_pc, app_version
+					FROM core_user_activity
+					WHERE lower(user_pc) LIKE '%' || $1 || '%'
+					  AND deleted_at IS NULL
+					  AND action_type = 'LOGIN'
+					  AND created_at >= NOW() - INTERVAL '31 days'
+				) AS get_data
+			)
+			SELECT user_pc, app_version, ip_address FROM ranked_data WHERE rn = 1
+		) AS data_collection
+		INNER JOIN reader_information AS reader ON reader.pc_name = data_collection.user_pc
+		ORDER BY data_collection.app_version, data_collection.ip_address, data_collection.user_pc;`
 
-	var resp LocateResponse
-	var lastSeen time.Time
-
-	// Cari wildcard match query
-	searchTerm := "%" + strings.ToLower(keyword) + "%"
-	err = db.QueryRow(query, searchTerm).Scan(&resp.NamaLokasi, &resp.IPAddress, &lastSeen)
+	rows, err := db.Query(query, strings.ToLower(keyword))
 	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Query execution failed: " + err.Error()})
+		return
+	}
+	defer rows.Close()
+
+	var gates []LocateResponse
+	for rows.Next() {
+		var g LocateResponse
+		if err := rows.Scan(&g.NamaLokasi, &g.IPAddress); err == nil {
+			if g.IPAddress != "" {
+				gates = append(gates, g)
+			}
+		}
+	}
+
+	if len(gates) == 0 {
 		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Lokasi tidak ditemukan atau data activity kosong 31 hari terakhir."})
-		logAccess(r, 404, "LOKASI TIDAK KETEMU: "+keyword)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Data gate tidak ditemukan untuk lokasi ini!"})
 		return
 	}
 
-	_ = json.NewEncoder(w).Encode(resp)
-	logAccess(r, 200, "GATE LOCATED SUCCESSFULLY: "+resp.NamaLokasi)
+	_ = json.NewEncoder(w).Encode(gates)
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {

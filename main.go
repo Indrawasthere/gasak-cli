@@ -45,13 +45,22 @@ var (
 
 func init() {
 	// ── Priority 1: GASAK Vault (encrypted local vault) ──────────
-	// Ini path utama — secret dienkripsi pake machine-id, gak ada plaintext di disk
+	// Ini path utama — secret dienkripsi pake Hybrid RSA-AES, gak ada plaintext di disk
 	vaultLoaded := false
 	if secrets, err := loadVault(); err == nil {
 		applyVaultSecrets(secrets)
 		vaultLoaded = true
 	} else {
-		fmt.Fprintf(os.Stderr, "[VAULT] Gagal load vault: %v — fallback ke .env\n", err)
+		// Analisis AI Internal Parkee: Supaya ga noise di local dev machine / fresh install,
+		// kita cek dulu apakah file vault-nya memang eksis di dalam path target.
+		vaultDir := filepath.Join(os.Getenv("HOME"), ".config/gasak")
+		vaultPath := filepath.Join(vaultDir, "vault")
+
+		if _, statErr := os.Stat(vaultPath); statErr == nil {
+			// File vault-nya ada, tapi kenapa gagal load? Berarti keypair RSA ga match / corrupt!
+			fmt.Fprintf(os.Stderr, "[VAULT] Gagal load vault: %v — fallback ke .env\n", err)
+		}
+		// Kalau file vault-nya emang gaada (Expected State saat develop / fresh install), silent aja men.
 	}
 
 	// ── Priority 2: .env fallback ─────────────────────────────────
@@ -77,11 +86,13 @@ func init() {
 	OutlineAPIKey = os.Getenv("OUTLINE_API_KEY")
 	LinearAPIKey = os.Getenv("LINEAR_API_KEY")
 
+	// Fallback password ssh support default PARKEE
 	SshPass = os.Getenv("PARKEE_SSH_PASS")
 	if SshPass == "" {
 		SshPass = "REMOVED_PASSWORD"
 	}
 
+	// Credential Database CMS Pusat untuk parsing di internal GASAK / script python
 	CmsDbHost = os.Getenv("CMS_DB_HOST")
 	CmsDbPort = os.Getenv("CMS_DB_PORT")
 	CmsDbUser = os.Getenv("CMS_DB_USER")
@@ -1406,116 +1417,93 @@ func checkPythonTk() bool {
 }
 
 func runFetchLog(tpUser *TeleportUser) {
-	logInfo("Fitur Ambil Log Agent Berbasis Aktivitas Server")
-	fmt.Println(dimStyle.Render("  Mencari IP Gate secara aman via Server Pusat..."))
-	fmt.Println()
-
-	var keyword string
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewInput().
-				Title("Ketik Nama Lokasi / Unicode (Contoh: 'Biak' atau '0eu'):").
-				Value(&keyword),
-		),
-	).WithTheme(crushTheme())
-
-	if err := form.Run(); err != nil {
-		logWarn("Pengambilan log dibatalkan.")
-		return
-	}
-
-	keyword = strings.TrimSpace(keyword)
-	if keyword == "" {
-		logErr("Keyword lokasi gak boleh kosong men!")
-		return
-	}
-
-	// 1. Request IP dari server pusat tanpa support tau kredensial DB nya
-	client := &http.Client{Timeout: 5 * time.Second}
-	req, err := http.NewRequest("GET", fmt.Sprintf("http://10.70.0.110:9002/api/locate-gate?keyword=%s", keyword), nil)
+	locs, err := loadLocations()
 	if err != nil {
-		logErr("Gagal membuat request: " + err.Error())
-		return
-	}
-	req.Header.Set("X-Gasak-Token", "gsk_dist_9f2k7x")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		logErr("Gagal menghubungi server pusat GASAK Vault: " + err.Error())
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		logErr("Lokasi ga ketemu men atau gaada aktivitas login 31 hari terakhir!")
-		return
-	} else if resp.StatusCode != http.StatusOK {
-		logErr(fmt.Sprintf("Server mengembalikan error status: %d", resp.StatusCode))
+		logErr("Gagal load data lokasi: " + err.Error())
 		return
 	}
 
-	var data struct {
-		NamaLokasi string `json:"nama_lokasi"`
-		IPAddress  string `json:"ip_address"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		logErr("Gagal membaca mapping data dari server pusat.")
-		return
-	}
-
-	if data.IPAddress == "" {
-		logErr("Data IP Lokasi kosong di database pusat!")
-		return
+	// Step 1: Pilih Lokasi Terlebih Dahulu
+	var selectedUnicode string
+	var opts []huh.Option[string]
+	for _, l := range locs {
+		label := fmt.Sprintf("%-8s | %-45s | %s", l.Unicode, truncate(l.Nama, 45), l.IP)
+		opts = append(opts, huh.NewOption(label, l.Unicode))
 	}
 
-	clearScreen()
-	showMiniHeader()
-	logOK(fmt.Sprintf("Target Terdeteksi: %s (%s)", data.NamaLokasi, data.IPAddress))
-
-	// Ekstrak unicode otomatis dari nama lokasi buat login node teleport (Contoh: server-0eu)
-	// Kita cari pola 3 digit lokasi seperti 0eu, 0pv, dll
-	unicodeTarget := "0eu" // fallback default
-	re := regexp.MustCompile(`(?i)server-([a-z0-9]{3})`)
-	if match := re.FindStringSubmatch(data.NamaLokasi); len(match) > 1 {
-		unicodeTarget = strings.ToLower(match[1])
-	} else {
-		// Jika gaada text "server-xxx", coba ambil 3 huruf terakhir keyword atau sesuaikan
-		logWarn("Gagal parsing unicode otomatis dari activity log, menggunakan default node session.")
-	}
-
-	teleportNodeUser := fmt.Sprintf("server-%s", unicodeTarget)
-
-	// 2. Tawarkan log mana yang mau dibaca
-	var selectedLog string
-	logForm := huh.NewForm(
+	locForm := huh.NewForm(
 		huh.NewGroup(
 			huh.NewSelect[string]().
-				Title("Pilih file log yang mau di-inspect:").
-				Options(
-					huh.NewOption("Parkee Agent Log (/var/log/agent/parkee-agent)", "/var/log/agent/parkee-agent"),
-					huh.NewOption("Application Backup Log (/var/tmp/application)", "/var/tmp/application"),
-				).
-				Value(&selectedLog),
+				Title("Pilih lokasi target:").
+				Description(fmt.Sprintf("%d lokasi aktif ditemukan", len(locs))).
+				Options(opts...).
+				Value(&selectedUnicode).
+				Filtering(true),
 		),
 	).WithTheme(crushTheme())
 
-	if err := logForm.Run(); err != nil {
+	if err := locForm.Run(); err != nil {
+		logWarn("Ambil log dibatalkan.")
 		return
 	}
 
-	logInfo(fmt.Sprintf("Membuka sesi log via tsh ssh %s@%s ...", teleportNodeUser, teleportNodeUser))
-	fmt.Println(dimStyle.Render("  Menampilkan 100 baris terakhir log..."))
+	var selected *Location
+	for _, l := range locs {
+		if l.Unicode == selectedUnicode {
+			selected = &l
+			break
+		}
+	}
+	if selected == nil {
+		logErr("Lokasi tidak valid.")
+		return
+	}
+
 	fmt.Println()
 
-	// Sesuai flow bener dari lu: tsh ssh server-0eu@server-0eu "tail -n 100 /path/to/log"
-	tailCmd := fmt.Sprintf("tail -n 100 %s", selectedLog)
-	cmd := exec.Command("tsh", "ssh", fmt.Sprintf("%s@%s", teleportNodeUser, teleportNodeUser), tailCmd)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
+	// Step 2: Filter log mana saja yang boleh diakses berdasarkan Role (L1 vs L2)
+	var sourceOpts []huh.Option[string]
+	for _, src := range logSources {
+		// Jika log khusus L2 (PostgreSQL) tapi user-nya L1 (support), kita sembunyikan!
+		if src.AllowedForL2 && !tpUser.IsL2 {
+			continue
+		}
+		sourceOpts = append(sourceOpts, huh.NewOption(src.Name, src.Name))
+	}
 
-	if err := cmd.Run(); err != nil {
-		logErr("Gagal fetch log via Teleport. Pastikan lu udah 'tsh login' dulu ya men!")
+	var selectedSourceName string
+	sourceForm := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title(fmt.Sprintf("Pilih tipe log untuk %s [%s]:", selected.Nama, selected.Unicode)).
+				Options(sourceOpts...).
+				Value(&selectedSourceName),
+		),
+	).WithTheme(crushTheme())
+
+	if err := sourceForm.Run(); err != nil {
+		logWarn("Ambil log dibatalkan.")
+		return
+	}
+
+	var chosenSource LogSource
+	for _, src := range logSources {
+		if src.Name == selectedSourceName {
+			chosenSource = src
+			break
+		}
+	}
+
+	fmt.Println()
+
+	// Step 3: Eksekusi penarikan berdasarkan type data
+	if chosenSource.IsAgentLog {
+		// Log ada di gate PC — perlu flow 2-hop via server main
+		fetchAgentGateLog(tpUser, selected, chosenSource.Path, chosenSource.Name)
+	} else if chosenSource.IsDir {
+		fetchLogFromDir(tpUser, selected, chosenSource.Path, chosenSource.Name)
+	} else {
+		fetchSingleFile(tpUser, selected, chosenSource.Path, chosenSource.Name)
 	}
 }
 
@@ -1672,64 +1660,48 @@ type GateInfo struct {
 
 // queryGatesFromDB SSH ke server main, query postgres, return list gate (yang aktif doang tapi)
 func queryGatesFromDB(tpUser *TeleportUser, loc *Location) ([]GateInfo, error) {
-	uni := strings.ToLower(loc.Unicode)
-	dbName := "agent_" + uni
+	// Ambil data langsung lewat Vault Server Pusat port 9002
+	// Tanpa perlu psql direct dari CLI client, Support Engineer aman dari limitasi RBAC DB
+	url := fmt.Sprintf("http://10.70.0.110:9002/api/locate-gate?keyword=%s", strings.ToLower(loc.Unicode))
 
-	likePattern := "%" + uni + "%"
-	sql := "SELECT DISTINCT ON (user_pc) user_pc, ip_address FROM (SELECT user_pc, ip_address, created_at FROM core_user_activity WHERE lower(user_pc) LIKE '" + likePattern + "' AND deleted_at IS NULL AND action_type = 'LOGIN' AND created_at >= NOW() - INTERVAL '31 days') AS get_data ORDER BY user_pc, created_at DESC;"
-	rawSQL := `psql -h localhost -U agent -d ` + dbName + ` -t -A -F'|' -c "` + sql + `"`
-
-	var out []byte
-	var err error
-
-	nodeName := nodeNameFromUnicode(loc.Unicode)
-	cmd := exec.Command("tsh", "ssh",
-		fmt.Sprintf("%s@%s", nodeName, nodeName),
-		rawSQL,
-	)
-	out, err = cmd.CombinedOutput()
-
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("Fetching data gate gagal nich: %w (output: %s)", err, string(out))
+		return nil, fmt.Errorf("gagal membuat request ke vault: %w", err)
 	}
 
-	raw := strings.TrimSpace(string(out))
-	if raw == "" {
-		return nil, fmt.Errorf("ga ada data gate aktif di DB lokasi ini (31 hari terakhir)")
+	// Inject token pengaman internal
+	req.Header.Set("X-Gasak-Token", "gsk_dist_9f2k7x")
+
+	client := &http.Client{Timeout: 7 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("vault server tidak merespon: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp map[string]string
+		_ = json.NewDecoder(resp.Body).Decode(&errResp)
+		return nil, fmt.Errorf("error server (%d): %s", resp.StatusCode, errResp["error"])
 	}
 
+	type VaultGateData struct {
+		NamaLokasi string `json:"nama_lokasi"`
+		IPAddress  string `json:"ip_address"`
+	}
+
+	var apiData []VaultGateData
+	if err := json.NewDecoder(resp.Body).Decode(&apiData); err != nil {
+		return nil, fmt.Errorf("gagal membaca payload data gate: %w", err)
+	}
+
+	// Mapping ke struct internal GateInfo milik GASAK CLI
 	var gates []GateInfo
-	for _, line := range strings.Split(raw, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, "|", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		userPC := strings.TrimSpace(parts[0])
-		rawIP := strings.TrimSpace(parts[1])
-
-		selectedIP := ""
-		for _, token := range strings.Fields(rawIP) {
-			if strings.HasPrefix(token, "10.") {
-				selectedIP = token
-				break
-			}
-		}
-		if selectedIP == "" && len(strings.Fields(rawIP)) > 0 {
-			selectedIP = strings.Fields(rawIP)[0]
-		}
-
-		if userPC == "" || selectedIP == "" {
-			continue
-		}
-		gates = append(gates, GateInfo{UserPC: userPC, IP: selectedIP})
-	}
-
-	if len(gates) == 0 {
-		return nil, fmt.Errorf("Fetching data gate kosong men — ga ada gate login dalam 31 hari terakhir")
+	for _, data := range apiData {
+		gates = append(gates, GateInfo{
+			UserPC: data.NamaLokasi,
+			IP:     data.IPAddress,
+		})
 	}
 
 	return gates, nil
