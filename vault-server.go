@@ -239,24 +239,24 @@ func handleLocateGate(w http.ResponseWriter, r *http.Request) {
 
 	// Query pencarian data aktivitas login dari user
 	query := `
-		SELECT DISTINCT ON (user_pc)
-			user_pc AS nama_lokasi,
-			(
-				SELECT trim(ip)
-				FROM unnest(string_to_array(ip_address, ' ')) AS ip
-				WHERE ip LIKE '10.70.%'
-				LIMIT 1
-			) AS ip_address,
-			created_at AS last_seen
-		FROM (
-			SELECT user_pc, ip_address, created_at
-			FROM core_user_activity
-			WHERE lower(user_pc) LIKE $1
-			  AND deleted_at IS NULL
-			  AND action_type = 'LOGIN'
-			  AND created_at >= NOW() - INTERVAL '31 days'
-		) AS get_data
-		ORDER BY user_pc, created_at DESC LIMIT 1;`
+			SELECT DISTINCT ON (user_pc)
+				user_pc AS nama_lokasi,
+				(
+					SELECT trim(ip)
+					FROM unnest(string_to_array(ip_address, ' ')) AS ip
+					WHERE ip LIKE '10.70.%'
+					LIMIT 1
+				) AS ip_address,
+				created_at AS last_seen
+			FROM (
+				SELECT user_pc, ip_address, created_at
+				FROM core_user_activity
+				WHERE trim(lower(user_pc)) LIKE $1
+				  AND deleted_at IS NULL
+				  AND action_type = 'LOGIN'
+				  AND created_at >= NOW() - INTERVAL '31 days'
+			) AS get_data
+			ORDER BY user_pc, created_at DESC LIMIT 1;`
 
 	var resp LocateResponse
 	var lastSeen time.Time
