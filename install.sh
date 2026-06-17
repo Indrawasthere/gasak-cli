@@ -16,8 +16,10 @@ SERVER_PORT="9001"
 VAULT_PORT="9002"
 GASAK_DIST_TOKEN="gsk_dist_9f2k7x"
 BASE_URL="http://${SERVER_IP}:${SERVER_PORT}"
+VAULT_URL="http://${SERVER_IP}:${VAULT_PORT}"
 INSTALL_DIR="$HOME/gasak-dist"
 ENV_PATH="${INSTALL_DIR}/.env"
+CONFIG_DIR="$HOME/.config/gasak"
 
 # ─── COLORS ───────────────────────────────────────────────────
 GREEN='\033[0;32m'
@@ -25,132 +27,124 @@ CYAN='\033[0;36m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 BOLD='\033[1m'
+DIM='\033[2m'
 RESET='\033[0m'
 
 clear
-echo -e "${CYAN}════════════════════════════════════════════════════════════${RESET}"
-echo -e "${CYAN}${BOLD}        GASAK ENGINE TOOLCHAIN — INSTALLER                  ${RESET}"
-echo -e "${CYAN}════════════════════════════════════════════════════════════${RESET}"
+
+# ─── BANNER ───────────────────────────────────────────────────
+echo -e "${CYAN}"
+cat << 'BANNER'
+  ██████╗  █████╗ ███████╗ █████╗ ██╗  ██╗
+  ██╔════╝ ██╔══██╗██╔════╝██╔══██╗██║ ██╔╝
+  ██║  ███╗███████║███████╗███████║█████╔╝
+  ██║   ██║██╔══██║╚════██║██╔══██║██╔═██╗
+  ╚██████╔╝██║  ██║███████║██║  ██║██║  ██╗
+   ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝
+BANNER
+echo -e "${RESET}"
+echo -e "${DIM}  Parkee Internal Toolchain — Engine Installer${RESET}"
+echo -e "${DIM}  ─────────────────────────────────────────────${RESET}"
 echo ""
 
 # ─── HELPERS ──────────────────────────────────────────────────
-ok()      { echo -e "   ${GREEN}[✔] $1${RESET}"; }
-err()     { echo -e "   ${RED}[✘] $1${RESET}"; }
-info()    { echo -e "   ${CYAN}[→] $1${RESET}"; }
-warn()    { echo -e "   ${YELLOW}[!] $1${RESET}"; }
-section() {
+ok()      { echo -e "  ${GREEN}✔${RESET}  $1"; }
+err()     { echo -e "  ${RED}✘${RESET}  $1"; }
+info()    { echo -e "  ${CYAN}→${RESET}  $1"; }
+warn()    { echo -e "  ${YELLOW}!${RESET}  $1"; }
+step()    {
     echo ""
-    echo -e "${CYAN}────────────────────────────────────────────────────────────${RESET}"
-    echo -e "${BOLD}  $1${RESET}"
-    echo -e "${CYAN}────────────────────────────────────────────────────────────${RESET}"
+    echo -e "  ${BOLD}${CYAN}[$1]${RESET}  ${BOLD}$2${RESET}"
+    echo -e "  ${DIM}$(printf '%.0s─' {1..52})${RESET}"
 }
+done_step() { echo -e "  ${DIM}$(printf '%.0s─' {1..52})${RESET}"; }
 
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 
-# ══════════════════════════════════════════════════════════════
-# STEP 1 — CEK KONEKSI KE SERVER
-# ══════════════════════════════════════════════════════════════
-section "STEP 1/8 — PREFLIGHT CHECK"
+spinner_wait() {
+    local pid=$1
+    local msg="${2:-tunggu...}"
+    local sp='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local i=0
+    while kill -0 "$pid" 2>/dev/null; do
+        i=$(( (i+1) % 10 ))
+        printf "\r  ${CYAN}${sp:$i:1}${RESET}  ${DIM}%s${RESET}" "$msg"
+        sleep 0.1
+    done
+    printf "\r"
+}
 
-# Deteksi distro
+# ══════════════════════════════════════════════════════════════
+# STEP 1 — PREFLIGHT
+# ══════════════════════════════════════════════════════════════
+step "1/8" "PREFLIGHT CHECK"
+
 if [ -f /etc/os-release ]; then
     . /etc/os-release
-    info "Distro: ${PRETTY_NAME:-Unknown}"
+    ok "Distro terdeteksi: ${PRETTY_NAME:-Unknown}"
 else
-    warn "Gak bisa deteksi distro, lanjut aja dengan asumsi Debian-based."
+    warn "Gak bisa deteksi distro — asumsi Debian-based"
 fi
 
-# Cek koneksi ke server distribusi
-info "Ngecek koneksi ke server distribusi ${SERVER_IP}:${SERVER_PORT}..."
+info "Ngecek koneksi ke distribution server..."
 if curl -fsSL --max-time 10 --connect-timeout 5 \
     "${BASE_URL}/version.txt" -o /dev/null 2>/dev/null; then
-    GASAK_VERSION=$(curl -fsSL --max-time 5 "${BASE_URL}/version.txt" 2>/dev/null \
-        | tr -d '[:space:]' || echo "unknown")
-    ok "Server online! Versi GASAK tersedia: ${GASAK_VERSION}"
+    GASAK_VERSION=$(curl -fsSL --max-time 5 "${BASE_URL}/version.txt" 2>/dev/null | tr -d '[:space:]' || echo "unknown")
+    ok "Server online — GASAK v${GASAK_VERSION} tersedia"
 else
-    err "Gak bisa konek ke server distribusi ${SERVER_IP}:${SERVER_PORT}!"
-    err "Kemungkinan penyebab:"
-    err "  1. Belum connect ke ZeroTier / VPN internal"
-    err "  2. Server supeng (${SERVER_IP}) lagi mati"
-    err "  3. Coba ping dulu: ping -c 3 ${SERVER_IP}"
+    err "Gak bisa konek ke distribution server ${SERVER_IP}:${SERVER_PORT}"
+    echo ""
+    echo -e "  ${DIM}Kemungkinan penyebab:${RESET}"
+    echo -e "  ${DIM}  · Belum connect ke ZeroTier / VPN internal${RESET}"
+    echo -e "  ${DIM}  · Server supeng (${SERVER_IP}) lagi down${RESET}"
+    echo -e "  ${DIM}  · Coba: ping -c 3 ${SERVER_IP}${RESET}"
+    echo ""
     exit 1
 fi
+done_step
 
 # ══════════════════════════════════════════════════════════════
-# STEP 2 — APT SYSTEM DEPENDENCIES (NON-BLOCKING)
+# STEP 2 — SYSTEM DEPENDENCIES (APT, BEST EFFORT)
 # ══════════════════════════════════════════════════════════════
-section "STEP 2/8 — SYSTEM DEPENDENCIES VIA APT (BEST EFFORT)"
-warn "Step ini NON-BLOCKING. APT gagal = lanjut, bukan abort."
-warn "Kalau ada yang miss, nanti dikasih tau di summary bawah ya men."
-echo ""
+step "2/8" "SYSTEM DEPENDENCIES"
+warn "Non-blocking — APT error tidak menghentikan instalasi"
 
-# Coba sudo dulu
 SUDO_OK=false
-if sudo -v 2>/dev/null; then
-    SUDO_OK=true
-else
-    warn "sudo gak available. APT install di-skip semua."
-fi
+if sudo -v 2>/dev/null; then SUDO_OK=true; fi
 
-# Detect APT status
 APT_UPDATE_OK=true
 if [ "$SUDO_OK" = true ] && command_exists apt-get; then
-    info "Ngecek status APT..."
+    info "Update package index..."
     if ! timeout 15 sudo apt-get update -y -q 2>/dev/null; then
-        warn "apt-get update gagal — tapi tetap coba install dari local cache."
+        warn "apt-get update gagal — pakai local cache"
         APT_UPDATE_OK=false
     fi
 fi
 
-# Repair dulu kalau APT OK
 if [ "$APT_UPDATE_OK" = true ] && [ "$SUDO_OK" = true ]; then
-    info "Nyoba repair broken packages dulu (kalau ada)..."
-    timeout 30 sudo dpkg --configure -a 2>/dev/null || warn "dpkg configure timeout/failed, skip"
-    timeout 30 sudo apt-get install -f -y 2>/dev/null || warn "apt-get -f timeout/failed, skip"
+    timeout 30 sudo dpkg --configure -a 2>/dev/null || true
+    timeout 30 sudo apt-get install -f -y 2>/dev/null || true
 fi
 
 APT_DEPS=(
-    "python3"
-    "python3-pip"
-    "python3-tk"
-    "python3-venv"
-    "python-is-python3"
-    "sshpass"
-    "rsync"
-    "unzip"
-    "curl"
-    "wget"
-    "iputils-ping"
-    "fzf"
-    "lsof"
-    "net-tools"
-    "git"
+    "python3" "python3-pip" "python3-tk" "python3-venv"
+    "python-is-python3" "sshpass" "rsync" "unzip" "curl"
+    "wget" "iputils-ping" "fzf" "lsof" "net-tools" "git"
 )
 
-INSTALLED_NEW=()
-ALREADY_INSTALLED=()
 FAILED_APT=()
-
 APT_AVAILABLE=false
-if [ "$SUDO_OK" = true ] && command_exists apt-get; then
-    APT_AVAILABLE=true
-fi
-
-if [ "$APT_AVAILABLE" = false ]; then
-    warn "apt-get gak ada / sudo gak available. Skip semua APT install."
-fi
+[ "$SUDO_OK" = true ] && command_exists apt-get && APT_AVAILABLE=true
 
 for pkg in "${APT_DEPS[@]}"; do
     if dpkg -s "$pkg" >/dev/null 2>&1; then
-        ALREADY_INSTALLED+=("$pkg")
-        ok "Udah ada: ${pkg}"
+        ok "Sudah ada: ${pkg}"
     elif [ "$APT_AVAILABLE" = true ]; then
-        info "Install: ${pkg}..."
+        printf "  ${CYAN}→${RESET}  Install %-25s" "${pkg}..."
         if DEBIAN_FRONTEND=noninteractive timeout 60 sudo apt-get install -y -q "$pkg" 2>/dev/null; then
-            INSTALLED_NEW+=("$pkg")
-            ok "Keinstall: ${pkg}"
+            echo -e " ${GREEN}✔${RESET}"
         else
-            warn "Gagal install ${pkg} via APT — skip, lanjut"
+            echo -e " ${YELLOW}skip${RESET}"
             FAILED_APT+=("$pkg")
         fi
     else
@@ -160,27 +154,20 @@ done
 
 if [ ${#FAILED_APT[@]} -ne 0 ]; then
     echo ""
-    warn "Package APT berikut gagal / di-skip (NON-FATAL):"
-    for p in "${FAILED_APT[@]}"; do
-        warn "    - $p"
-    done
-    warn "Coba manual nanti: sudo apt-get install ${FAILED_APT[*]}"
+    warn "Package yang gagal (non-fatal): ${FAILED_APT[*]}"
+    warn "Install manual: sudo apt-get install ${FAILED_APT[*]}"
 fi
 
 if ! command_exists python && command_exists python3; then
-    warn "'python' command gak ada. Bikin symlink ke python3..."
     PYTHON3_PATH=$(command -v python3)
-    if sudo ln -sf "$PYTHON3_PATH" /usr/local/bin/python 2>/dev/null; then
-        ok "Symlink python → python3 dibuat di /usr/local/bin/"
-    else
-        warn "Gagal bikin symlink. 'python3' tetap jalan kok, tenang."
-    fi
+    sudo ln -sf "$PYTHON3_PATH" /usr/local/bin/python 2>/dev/null || true
 fi
+done_step
 
 # ══════════════════════════════════════════════════════════════
 # STEP 3 — VERIFIKASI PYTHON RUNTIME
 # ══════════════════════════════════════════════════════════════
-section "STEP 3/8 — CEK PYTHON RUNTIME"
+step "3/8" "PYTHON RUNTIME CHECK"
 
 PYTHON_CMD=""
 PIP_CMD=""
@@ -192,52 +179,50 @@ for cmd in python3 python; do
         PY_MINOR=$(echo "$PY_VERSION" | cut -d. -f2)
         if [ "$PY_MAJOR" -ge 3 ] && [ "$PY_MINOR" -ge 8 ]; then
             PYTHON_CMD="$cmd"
-            ok "Python OK: $("$cmd" --version 2>&1) → command: $cmd"
+            ok "Python OK: $("$cmd" --version 2>&1)"
             break
-        else
-            warn "Python ketemu tapi versinya jadul: $("$cmd" --version 2>&1) — minimal 3.8"
         fi
     fi
 done
 
-if [ -z "$PYTHON_CMD" ]; then
-    err "Python 3.8+ gak ketemu sama sekali!"
-    exit 1
-fi
+[ -z "$PYTHON_CMD" ] && { err "Python 3.8+ tidak ditemukan. Installer berhenti."; exit 1; }
 
 for cmd in pip3 pip; do
     if command_exists "$cmd"; then
         PIP_CMD="$cmd"
-        ok "pip OK: $("$cmd" --version 2>&1 | head -1) → command: $cmd"
+        ok "pip OK: $("$cmd" --version 2>&1 | head -1)"
         break
     fi
 done
 
 if [ -z "$PIP_CMD" ]; then
-    warn "pip gak ketemu via PATH. Nyoba lewat python -m pip..."
     if $PYTHON_CMD -m pip --version >/dev/null 2>&1; then
         PIP_CMD="$PYTHON_CMD -m pip"
-        ok "pip jalan via: $PYTHON_CMD -m pip"
+        ok "pip via: $PYTHON_CMD -m pip"
     else
-        err "pip gak ada sama sekali. Installer berhenti."
+        err "pip tidak ditemukan. Installer berhenti."
         exit 1
     fi
 fi
+done_step
 
 # ══════════════════════════════════════════════════════════════
-# STEP 4 — SETUP DIREKTORI INSTALL
+# STEP 4 — SETUP DIREKTORI
 # ══════════════════════════════════════════════════════════════
-section "STEP 4/8 — SETUP DIREKTORI INSTALL"
-info "Nyiapin direktori: ${INSTALL_DIR}"
+step "4/8" "SETUP DIREKTORI INSTALASI"
+
+info "Menyiapkan: ${INSTALL_DIR}"
 mkdir -p "$INSTALL_DIR"
-cd "$INSTALL_DIR" || { err "Gagal masuk ke ${INSTALL_DIR}!"; exit 1; }
-ok "Direktori siap: ${INSTALL_DIR}"
+cd "$INSTALL_DIR" || { err "Gagal masuk ke ${INSTALL_DIR}"; exit 1; }
+ok "Direktori siap"
+done_step
 
 # ══════════════════════════════════════════════════════════════
-# STEP 5 — DOWNLOAD SEMUA KOMPONEN GASAK
+# STEP 5 — DOWNLOAD KOMPONEN GASAK
 # ══════════════════════════════════════════════════════════════
-section "STEP 5/8 — DOWNLOAD GASAK TOOLCHAIN"
-info "Download semua file dari server distribusi..."
+step "5/8" "DOWNLOAD GASAK TOOLCHAIN"
+info "Mengunduh komponen dari distribution server..."
+echo ""
 
 FILES_TO_DOWNLOAD=(
     "gasak"
@@ -252,75 +237,108 @@ FILES_TO_DOWNLOAD=(
 DOWNLOAD_FAILED=()
 
 for file in "${FILES_TO_DOWNLOAD[@]}"; do
-    printf "    → %-35s " "${file}..."
-    if [ "$file" = "gasak" ]; then
-            CURL_TIMEOUT=600
+    CURL_TIMEOUT=60
+    [ "$file" = "gasak" ] && CURL_TIMEOUT=600
+
+    # Resume-capable download dengan retry
+    MAX_RETRIES=3
+    RETRY=0
+    DOWNLOAD_OK=false
+
+    while [ $RETRY -lt $MAX_RETRIES ]; do
+        RETRY=$((RETRY + 1))
+        PARTIAL="${INSTALL_DIR}/${file}.partial"
+
+        # -C - = resume dari byte terakhir kalau file partial ada
+        if curl -fsSL --max-time "$CURL_TIMEOUT" --connect-timeout 15 \
+            -C - \
+            "${BASE_URL}/${file}" -o "${PARTIAL}" 2>/dev/null; then
+
+            # Verifikasi file tidak kosong
+            if [ -s "${PARTIAL}" ]; then
+                mv "${PARTIAL}" "${INSTALL_DIR}/${file}"
+                FILESIZE=$(du -sh "${INSTALL_DIR}/${file}" 2>/dev/null | cut -f1 || echo "?")
+                printf "  ${GREEN}✔${RESET}  %-30s ${DIM}%s${RESET}\n" "${file}" "(${FILESIZE})"
+                DOWNLOAD_OK=true
+                break
+            else
+                warn "File kosong, retry ${RETRY}/${MAX_RETRIES}..."
+                rm -f "${PARTIAL}"
+            fi
         else
-            CURL_TIMEOUT=60
+            [ $RETRY -lt $MAX_RETRIES ] && warn "${file} gagal, retry ${RETRY}/${MAX_RETRIES}..." || true
+            rm -f "${PARTIAL}"
+            sleep 1
         fi
-    if curl -fsSL --max-time "$CURL_TIMEOUT" --connect-timeout 15 \
-        "${BASE_URL}/${file}" -o "${INSTALL_DIR}/${file}" 2>/dev/null; then
-        FILESIZE=$(du -sh "${INSTALL_DIR}/${file}" 2>/dev/null | cut -f1 || echo "?")
-        echo -e "${GREEN}OK (${FILESIZE})${RESET}"
-    else
-        echo -e "${RED}GAGAL!${RESET}"
+    done
+
+    if [ "$DOWNLOAD_OK" = false ]; then
+        printf "  ${RED}✘${RESET}  %-30s ${RED}GAGAL setelah %d retry${RESET}\n" "${file}" "$MAX_RETRIES"
         DOWNLOAD_FAILED+=("$file")
     fi
 done
 
+echo ""
 if [ ${#DOWNLOAD_FAILED[@]} -ne 0 ]; then
-    err "File nya gagal di download nih men"
+    err "Download gagal untuk: ${DOWNLOAD_FAILED[*]}"
+    err "Cek koneksi ZeroTier dan coba ulang."
     exit 1
 fi
-
-ok "Nice, semua komponen aman"
+ok "Semua komponen berhasil diunduh"
+done_step
 
 # ══════════════════════════════════════════════════════════════
-# STEP 6 — ENROLLMENT & VAULT SECURING (UPGRADED CRYPTO LOCK)
+# STEP 6 — VAULT ENROLLMENT (ASYMMETRIC CRYPTO)
 # ══════════════════════════════════════════════════════════════
-section "STEP 6/8 — SECURING ENCRYPTED LOCAL VAULT"
-info "[6/7] Menyiapkan Kriptografi Asymmetric Lokal..."
+step "6/8" "SECURING ENCRYPTED LOCAL VAULT"
 
-TARGET_CONFIG_DIR="/home/admin-0eu/.config/gasak"
-mkdir -p "$TARGET_CONFIG_DIR"
-rm -f "$TARGET_CONFIG_DIR/id_rsa"*
+# Pakai $HOME yang bener — BUKAN hardcoded username
+mkdir -p "$CONFIG_DIR"
+chmod 700 "$CONFIG_DIR"
+rm -f "$CONFIG_DIR/id_rsa" "$CONFIG_DIR/id_rsa.pub"
 
-info "Generating fresh standard RSA keypair..."
-# Pasang silencer kembali, format dipastikan murni & clean untuk biner Go
-openssl genrsa -out "$TARGET_CONFIG_DIR/id_rsa" 2048 > /dev/null 2>&1
-openssl rsa -in "$TARGET_CONFIG_DIR/id_rsa" -pubout -out "$TARGET_CONFIG_DIR/id_rsa.pub" > /dev/null 2>&1
+info "Generating RSA-2048 keypair di ${CONFIG_DIR}..."
+openssl genrsa -out "$CONFIG_DIR/id_rsa" 2048 > /dev/null 2>&1
+openssl rsa -in "$CONFIG_DIR/id_rsa" -pubout -out "$CONFIG_DIR/id_rsa.pub" > /dev/null 2>&1
+chmod 600 "$CONFIG_DIR/id_rsa"
+chmod 644 "$CONFIG_DIR/id_rsa.pub"
 
-PUB_KEY_PATH="$TARGET_CONFIG_DIR/id_rsa.pub"
+PUB_KEY_PATH="$CONFIG_DIR/id_rsa.pub"
 if [ ! -f "$PUB_KEY_PATH" ]; then
-    err "Gagal generate secure RSA Identity lokal."
+    err "Gagal generate RSA keypair."
     exit 1
 fi
+ok "RSA keypair di-bind ke: ${CONFIG_DIR}"
 
-# Mengubah baris baru menjadi karakter '\n' literal agar aman di dalam JSON string
-PUB_KEY_CONTENT=$(cat "$PUB_KEY_PATH" | awk '{printf "%s\\n", $0}')
+# Kirim public key ke vault server, terima secrets terenkripsi
+PUB_KEY_CONTENT=$(awk '{printf "%s\\n", $0}' "$PUB_KEY_PATH")
 
-info "Menghubungi Central Vault Server untuk mengunduh enkripsi secrets..."
-VAULT_RESPONSE=$(curl -s -X POST \
+info "Menghubungi GASAK Vault Server (${SERVER_IP}:${VAULT_PORT})..."
+
+VAULT_RESPONSE=$(curl -s --max-time 15 --connect-timeout 10 \
+  -X POST \
   -H "Content-Type: application/json" \
-  -d "{\"token\":\"gsk_dist_9f2k7x\", \"public_key\":\"${PUB_KEY_CONTENT}\"}" \
-  "http://10.70.0.110:9002/getenv")
+  -d "{\"token\":\"${GASAK_DIST_TOKEN}\", \"public_key\":\"${PUB_KEY_CONTENT}\"}" \
+  "${VAULT_URL}/getenv")
 
 if echo "$VAULT_RESPONSE" | grep -q "encrypted_key"; then
-    echo "$VAULT_RESPONSE" > "$TARGET_CONFIG_DIR/vault"
-    chmod 600 "$TARGET_CONFIG_DIR/vault"
-    ok "Local secure vault berhasil dikonfigurasi & di-bind ke RSA Keypair mesin ini!"
+    echo "$VAULT_RESPONSE" > "$CONFIG_DIR/vault"
+    chmod 600 "$CONFIG_DIR/vault"
+    ok "Vault berhasil di-bind ke mesin ini"
+    ok "Secrets dienkripsi RSA — tidak ada plaintext di disk"
 else
-    err "Gagal mengambil konfigurasi secure vault dari server."
-    echo -e "${RED}Server Response: ${VAULT_RESPONSE}${RESET}"
-    exit 1
+    err "Vault enrollment gagal."
+    echo -e "  ${DIM}Response: ${VAULT_RESPONSE}${RESET}"
+    echo ""
+    warn "Installer tetap lanjut — fallback ke .env mode"
+    warn "Ping Fadlan kalau ini terus-terusan error"
 fi
+done_step
 
 # ══════════════════════════════════════════════════════════════
-# STEP 7 — INSTALL PYTHON MODULES VIA PIP
+# STEP 7 — PYTHON MODULES
 # ══════════════════════════════════════════════════════════════
-section "STEP 7/8 — INSTALL PYTHON MODULES"
-info "Python: $($PYTHON_CMD --version 2>&1)"
-info "pip   : $($PIP_CMD --version 2>&1 | head -1)"
+step "7/8" "PYTHON DEPENDENCIES"
 echo ""
 
 PIP_PACKAGES=(
@@ -349,50 +367,44 @@ pip_install_with_fallback() {
 
 PIP_FAILED=()
 for pkg in "${PIP_PACKAGES[@]}"; do
-    printf "    → %-30s " "${pkg}..."
+    printf "  ${CYAN}→${RESET}  Install %-25s" "${pkg}..."
     if pip_install_with_fallback "$pkg"; then
-        INSTALLED_VER=$($PYTHON_CMD -c \
-            "import importlib.metadata; print(importlib.metadata.version('${pkg}'))" \
-            2>/dev/null || echo "ok")
-        echo -e "${GREEN}OK (${INSTALLED_VER})${RESET}"
+        VER=$($PYTHON_CMD -c "import importlib.metadata; print(importlib.metadata.version('${pkg}'))" 2>/dev/null || echo "ok")
+        echo -e " ${GREEN}✔${RESET} ${DIM}v${VER}${RESET}"
     else
-        echo -e "${RED}GAGAL${RESET}"
+        echo -e " ${RED}✘ GAGAL${RESET}"
         PIP_FAILED+=("$pkg")
     fi
 done
 
-# Pastiin ~/.local/bin masuk PATH biar pip package kepanggil
 LOCAL_BIN="$HOME/.local/bin"
 if [ -d "$LOCAL_BIN" ] && [[ ":$PATH:" != *":$LOCAL_BIN:"* ]]; then
     export PATH="$LOCAL_BIN:$PATH"
 fi
 
 echo ""
-info "Verifikasi import module..."
+info "Verifikasi import..."
 MODULES_TO_CHECK=("psycopg2" "requests" "questionary" "iterfzf" "rich" "tkinter")
-
 for mod in "${MODULES_TO_CHECK[@]}"; do
     if $PYTHON_CMD -c "import $mod" 2>/dev/null; then
-        ok "import ${mod} — OK"
+        ok "import ${mod}"
     else
-        warn "import ${mod} — GAGAL"
+        warn "import ${mod} — tidak tersedia"
     fi
 done
+done_step
 
 # ══════════════════════════════════════════════════════════════
 # STEP 8 — PERMISSIONS, ALIAS & SHELL SETUP
 # ══════════════════════════════════════════════════════════════
-section "STEP 8/8 — PERMISSIONS, ALIAS & SHELL SETUP"
+step "8/8" "SHELL SETUP & PERMISSIONS"
 
-info "Set permission semua file..."
 chmod 755 "${INSTALL_DIR}/gasak"
-chmod 644 "${INSTALL_DIR}/"*.py  2>/dev/null || true
+chmod 644 "${INSTALL_DIR}/"*.py 2>/dev/null || true
 chmod 644 "${INSTALL_DIR}/version.txt" 2>/dev/null || true
 chmod 644 "${INSTALL_DIR}/server.properties" 2>/dev/null || true
-[ -f "$ENV_PATH" ] && chmod 600 "$ENV_PATH" || true
-ok "Permissions set."
+ok "File permissions set"
 
-info "Daftarin alias & PATH ke shell profiles..."
 ALIAS_LINE="alias gasak='${INSTALL_DIR}/gasak'"
 PATH_LINE="export PATH=\"\$HOME/.local/bin:\$PATH\""
 
@@ -403,56 +415,72 @@ SHELL_PROFILES=()
 [ -f "$HOME/.profile" ]      && SHELL_PROFILES+=("$HOME/.profile")
 
 for profile in "${SHELL_PROFILES[@]}"; do
-    PROFILE_CHANGED=false
+    CHANGED=false
     if ! grep -q "\.local/bin" "$profile" 2>/dev/null; then
-        echo "" >> "$profile"
-        echo "# GASAK: PATH ~/.local/bin" >> "$profile"
-        echo "$PATH_LINE" >> "$profile"
-        PROFILE_CHANGED=true
+        { echo ""; echo "# GASAK: PATH ~/.local/bin"; echo "$PATH_LINE"; } >> "$profile"
+        CHANGED=true
     fi
     if ! grep -q "alias gasak=" "$profile" 2>/dev/null; then
-        echo "" >> "$profile"
-        echo "# GASAK Toolchain" >> "$profile"
-        echo "$ALIAS_LINE" >> "$profile"
-        PROFILE_CHANGED=true
+        { echo ""; echo "# GASAK Toolchain"; echo "$ALIAS_LINE"; } >> "$profile"
+        CHANGED=true
     fi
-    if ! grep -q "gasak-dist/.env" "$profile" 2>/dev/null; then
-        echo "" >> "$profile"
-        echo "# GASAK: auto-load env vars" >> "$profile"
-        echo "[ -f \"${ENV_PATH}\" ] && set -a && source \"${ENV_PATH}\" && set +a" >> "$profile"
-        PROFILE_CHANGED=true
-    fi
-    if [ "$PROFILE_CHANGED" = true ]; then ok "Profile updated: ${profile}"; fi
+    [ "$CHANGED" = true ] && ok "Shell profile updated: $(basename "$profile")"
 done
 
 eval "$ALIAS_LINE" 2>/dev/null || true
 export PATH="$HOME/.local/bin:$PATH"
+done_step
 
 # ══════════════════════════════════════════════════════════════
-# FINAL — SUMMARY WITH COUPLED .ENV KEYS CHECKER
+# FINAL SUMMARY
 # ══════════════════════════════════════════════════════════════
 echo ""
-echo -e "${CYAN}════════════════════════════════════════════════════════════${RESET}"
-echo -e "${GREEN}${BOLD}  GASAK BERHASIL DIINSTALL MURNI & AMAN!                    ${RESET}"
-echo -e "${CYAN}════════════════════════════════════════════════════════════${RESET}"
+echo ""
+echo -e "  ${DIM}$(printf '%.0s═' {1..52})${RESET}"
+echo -e "  ${GREEN}${BOLD}  GASAK v${GASAK_VERSION} BERHASIL DIINSTALL${RESET}"
+echo -e "  ${DIM}$(printf '%.0s═' {1..52})${RESET}"
 echo ""
 
-echo -e "  ${BOLD}[ .ENV KEYS ]${RESET}"
-for key in GLPI_URL OUTLINE_URL OUTLINE_API_KEY LINEAR_API_KEY \
-           PARKEE_SSH_USER PARKEE_SSH_PASS \
-           CMS_DB_HOST CMS_DB_PORT CMS_DB_USER CMS_DB_PASS CMS_DB_NAME; do
-    if grep -q "^${key}=" "$ENV_PATH" 2>/dev/null; then
-        printf "  ├─ %-20s : ${GREEN}✔ ready${RESET}\n" "$key"
+# ── Status Vault ──────────────────────────────────────────────
+VAULT_FILE="$CONFIG_DIR/vault"
+if [ -f "$VAULT_FILE" ] && grep -q "encrypted_key" "$VAULT_FILE" 2>/dev/null; then
+    echo -e "  ${BOLD}VAULT STATUS${RESET}"
+    echo -e "  ${GREEN}✔${RESET}  Vault terenkripsi aktif"
+    echo -e "  ${GREEN}✔${RESET}  RSA keypair: ${CONFIG_DIR}/id_rsa"
+    echo -e "  ${GREEN}✔${RESET}  Secrets: tidak ada plaintext di disk"
+    VAULT_OK=true
+else
+    echo -e "  ${BOLD}VAULT STATUS${RESET}"
+    echo -e "  ${YELLOW}!${RESET}  Vault tidak aktif — mode .env fallback"
+    VAULT_OK=false
+fi
+
+echo ""
+echo -e "  ${BOLD}KOMPONEN${RESET}"
+for f in gasak decode_and_merge.py deploy_parkee.py log_cleaner.py settlement_rfs.py; do
+    if [ -f "${INSTALL_DIR}/${f}" ]; then
+        SIZE=$(du -sh "${INSTALL_DIR}/${f}" 2>/dev/null | cut -f1 || echo "?")
+        printf "  ${GREEN}✔${RESET}  %-30s ${DIM}%s${RESET}\n" "$f" "(${SIZE})"
     else
-        printf "  ├─ %-20s : ${YELLOW}⌛ encrypted / auto-generate on first run${RESET}\n" "$key"
+        printf "  ${RED}✘${RESET}  %-30s ${RED}MISSING${RESET}\n" "$f"
     fi
 done
+
+echo ""
+echo -e "  ${BOLD}CARA PAKAI${RESET}"
+echo -e "  ${DIM}Reload shell dulu men:${RESET}"
+echo -e "  ${CYAN}  source ~/.zshrc${RESET}  ${DIM}atau${RESET}  ${CYAN}source ~/.bashrc${RESET}"
+echo ""
+echo -e "  ${DIM}Terus langsung gas:${RESET}"
+echo -e "  ${GREEN}${BOLD}  gasak${RESET}"
 echo ""
 
-echo -e "  Silakan reload shell lu men:"
-echo -e "  ${CYAN}source ~/.zshrc${RESET} atau ${CYAN}source ~/.bashrc${RESET}"
-echo ""
-echo -e "  Setelah itu, langsung ketik perintah sakti:"
-echo -e "  ${GREEN}${BOLD}   gasak${RESET}"
-echo -e "${CYAN}════════════════════════════════════════════════════════════${RESET}"
+if [ "$VAULT_OK" = false ]; then
+    echo -e "  ${DIM}$(printf '%.0s─' {1..52})${RESET}"
+    echo -e "  ${YELLOW}NOTE:${RESET} Vault enrollment gagal. Minta Fadlan cek vault-server"
+    echo -e "  ${DIM}di supeng (port ${VAULT_PORT}) udah running belum.${RESET}"
+    echo ""
+fi
+
+echo -e "  ${DIM}$(printf '%.0s═' {1..52})${RESET}"
 echo ""

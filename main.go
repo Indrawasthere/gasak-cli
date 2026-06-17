@@ -1650,20 +1650,10 @@ func queryGatesFromDB(tpUser *TeleportUser, loc *Location) ([]GateInfo, error) {
 	uni := strings.ToLower(loc.Unicode)
 	dbName := "agent_" + uni // Merakit nama database langsung lewat variabel aman
 
-	// Menggunakan string concatenation murni untuk dbName,
-	// sehingga string literal Postgre ('31 days') aman tanpa perlu escape Sprintf
-	rawSQL := `psql -h localhost -U agent -d ` + dbName + ` -t -A -F'|' <<'EOF'
-SELECT DISTINCT ON (user_pc) user_pc, ip_address
-FROM (
-    SELECT user_pc, ip_address, created_at
-    FROM core_user_activity
-    WHERE lower(user_pc) LIKE '%' || (SELECT lower(unique_code) FROM location) || '%'
-      AND deleted_at IS NULL
-      AND action_type = 'LOGIN'
-      AND created_at >= NOW() - INTERVAL '31 days'
-) AS get_data
-ORDER BY user_pc, created_at DESC;
-EOF`
+	// Heredoc gak survive SSH one-liner — pakai -c dengan single-line SQL
+	// dbName dari concatenation aman (lowercase unicode, no injection surface)
+	sql := "SELECT DISTINCT ON (user_pc) user_pc, ip_address FROM (SELECT user_pc, ip_address, created_at FROM core_user_activity WHERE lower(user_pc) LIKE '%' || (SELECT lower(unique_code) FROM location) || '%' AND deleted_at IS NULL AND action_type = 'LOGIN' AND created_at >= NOW() - INTERVAL '31 days') AS get_data ORDER BY user_pc, created_at DESC;"
+	rawSQL := `psql -h localhost -U agent -d ` + dbName + ` -t -A -F'|' -c "` + sql + `"`
 
 	var out []byte
 	var err error
