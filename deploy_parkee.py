@@ -2,88 +2,97 @@
 """
 deploy_parkee.py
 Parkee Agent Deployment Tool
-UI: rich + questionary + iterfzf  |  Logic: merged from py_deploy + gum.sh
+UI: rich + questionary + iterfzf  |  Logic: merged from py_deploy by Mas Michael Martoyo + gum.sh
 """
 
-import os
-import sys
 import csv
-import time
+import os
 import signal
-import threading
 import subprocess
-from pathlib import Path
+import sys
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
-import requests
 import questionary
-from questionary import Style as QStyle
+import requests
 from iterfzf import iterfzf
+from questionary import Style as QStyle
 from rich import print as rprint
-from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
-from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn
-from rich.text import Text
-from rich.live import Live
+from rich.align import Align
 from rich.columns import Columns
+from rich.console import Console
+from rich.live import Live
+from rich.panel import Panel
+from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
+from rich.prompt import Confirm
 from rich.rule import Rule
 from rich.style import Style
-from rich.align import Align
-from rich.prompt import Confirm
+from rich.table import Table
+from rich.text import Text
 
 # ─────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────
 
-SPREADSHEET_ID  = "1A0ce374Dgw3pS4w05Yw9y1flJK5pZi6D-UUII6PG5VM"
-SHEET_GID       = "463772829"
-CSV_URL         = (
+SPREADSHEET_ID = "1A0ce374Dgw3pS4w05Yw9y1flJK5pZi6D-UUII6PG5VM"
+SHEET_GID = "463772829"
+CSV_URL = (
     f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export"
     f"?format=csv&gid={SHEET_GID}"
 )
 
-SSH_USER        = os.environ.get("PARKEE_SSH_USER", "support")
-SSH_PASS        = os.environ.get("PARKEE_SSH_PASS", "REMOVED_PASSWORD")
-SSH_TIMEOUT     = 10
-ACTUATOR_TIMEOUT= 5
+SSH_USER = os.environ.get("PARKEE_SSH_USER", "support")
+SSH_PASS = os.environ.get("PARKEE_SSH_PASS", "REMOVED_PASSWORD")
+SSH_TIMEOUT = 10
+ACTUATOR_TIMEOUT = 5
 
-APP_DIR         = "/opt/app/agent/parkee-agent"
-SERVER_PROPS    = f"{APP_DIR}/server.properties"
-JAVA_BIN        = "/usr/lib/jvm/bellsoft-java15-full-amd64/bin/java"
-JAR_NAME        = "parkee-agent-production.jar"
-AGENT_JAR_PATH  = "/mnt/shared/production/parkee-agent-production.jar"
+APP_DIR = "/opt/app/agent/parkee-agent"
+SERVER_PROPS = f"{APP_DIR}/server.properties"
+JAVA_BIN = "/usr/lib/jvm/bellsoft-java15-full-amd64/bin/java"
+JAR_NAME = "parkee-agent-production.jar"
+AGENT_JAR_PATH = "/mnt/shared/production/parkee-agent-production.jar"
 
-REMOTE_PROPS_PATH = f"{APP_DIR}/server.properties"  
+REMOTE_PROPS_PATH = f"{APP_DIR}/server.properties"
 
-FILES_TO_SYNC   = [
+FILES_TO_SYNC = [
     "/mnt/shared/production/parkee-agent-production.jar",
     "/mnt/shared/sound",
     "/mnt/shared/dependencies",
 ]
 
-CACHE_DIR       = Path.home() / ".cache" / "parkee"
-CACHE_FILE      = CACHE_DIR / "master_loc.csv"
-CACHE_TTL       = 3600  # 1 jam
+CACHE_DIR = Path.home() / ".cache" / "parkee"
+CACHE_FILE = CACHE_DIR / "master_loc.csv"
+CACHE_TTL = 3600  # 1 jam
 
-LOG_DIR         = Path.home() / "logs" / "parkee"
+LOG_DIR = Path.home() / "logs" / "parkee"
 
-SENSITIVE_KEYS  = {
-    "password", "username", "db", "credential.information",
-    "minio.endpoint", "fisherman.host", "kafkaHost", "redisHost", "dbHost"
+SENSITIVE_KEYS = {
+    "password",
+    "username",
+    "db",
+    "credential.information",
+    "minio.endpoint",
+    "fisherman.host",
+    "kafkaHost",
+    "redisHost",
+    "dbHost",
 }
 
-SSH_OPTS        = f"-o StrictHostKeyChecking=no -o LogLevel=ERROR -o ConnectTimeout={SSH_TIMEOUT}"
+SSH_OPTS = (
+    f"-o StrictHostKeyChecking=no -o LogLevel=ERROR -o ConnectTimeout={SSH_TIMEOUT}"
+)
 
 # JVM flags — full GPU + OpenGL
-JVM_FLAGS       = [
+JVM_FLAGS = [
     "-Dprism.order=d3d,es2,es1,sw,j2d",
     "-Dsun.java2d.opengl=true",
     "-Dprism.vsync=false",
     "-Dprism.forceGPU=true",
 ]
 
-DEPS_REQUIRED   = ["sshpass", "rsync", "unzip", "fzf", "ping", "curl"]
+DEPS_REQUIRED = ["sshpass", "rsync", "unzip", "fzf", "ping", "curl"]
 
 # ─────────────────────────────────────────────────────────────
 # CONSOLE & THEME
@@ -91,25 +100,27 @@ DEPS_REQUIRED   = ["sshpass", "rsync", "unzip", "fzf", "ping", "curl"]
 
 console = Console()
 
-PARKEE_STYLE = QStyle([
-    ("qmark",        "fg:#ff00ff bold"),
-    ("question",     "fg:#ffffff bold"),
-    ("answer",       "fg:#00ff87 bold"),
-    ("pointer",      "fg:#ff00ff bold"),
-    ("highlighted",  "fg:#ff00ff bold"),
-    ("selected",     "fg:#00ff87"),
-    ("separator",    "fg:#444444"),
-    ("instruction",  "fg:#888888"),
-    ("text",         "fg:#ffffff"),
-])
+PARKEE_STYLE = QStyle(
+    [
+        ("qmark", "fg:#ff00ff bold"),
+        ("question", "fg:#ffffff bold"),
+        ("answer", "fg:#00ff87 bold"),
+        ("pointer", "fg:#ff00ff bold"),
+        ("highlighted", "fg:#ff00ff bold"),
+        ("selected", "fg:#00ff87"),
+        ("separator", "fg:#444444"),
+        ("instruction", "fg:#888888"),
+        ("text", "fg:#ffffff"),
+    ]
+)
 
-PINK    = "bright_magenta"
-CYAN    = "cyan"
-GREEN   = "bright_green"
-RED     = "bright_red"
-YELLOW  = "yellow"
-PURPLE  = "medium_purple1"
-GREY    = "grey50"
+PINK = "bright_magenta"
+CYAN = "cyan"
+GREEN = "bright_green"
+RED = "bright_red"
+YELLOW = "yellow"
+PURPLE = "medium_purple1"
+GREY = "grey50"
 
 # ─────────────────────────────────────────────────────────────
 # INIT DIRS
@@ -122,20 +133,26 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 # UI HELPERS
 # ─────────────────────────────────────────────────────────────
 
+
 def ok(msg: str):
     console.print(f"[{GREEN}]✔[/] {msg}")
+
 
 def err(msg: str):
     console.print(f"[{RED}]✘[/] {msg}")
 
+
 def warn(msg: str):
     console.print(f"[{YELLOW}]⚠[/] {msg}")
+
 
 def info(msg: str):
     console.print(f"[{CYAN}]ℹ[/] {msg}")
 
+
 def line():
     console.print(Rule(style=GREY))
+
 
 def mask_ip(ip: str) -> str:
     parts = ip.split(".")
@@ -143,14 +160,17 @@ def mask_ip(ip: str) -> str:
         return f"{parts[0]}.{parts[1]}.{parts[2]}.*"
     return "***"
 
+
 def normalize(s: str) -> str:
     return str(s).strip().lower()
+
 
 def pad_unicode(raw: str) -> str:
     s = raw.strip().lower()
     if len(s) < 3:
         return s.zfill(3)
     return s
+
 
 # ─────────────────────────────────────────────────────────────
 # HEADER
@@ -166,6 +186,7 @@ ASCII_ART = """
 
 EL TEMBAK AGENT
 """
+
 
 def show_header():
     os.system("clear")
@@ -183,9 +204,13 @@ def show_header():
 # DEPENDENCY CHECK
 # ─────────────────────────────────────────────────────────────
 
+
 def check_dependencies():
-    missing = [d for d in DEPS_REQUIRED if subprocess.run(
-        ["which", d], capture_output=True).returncode != 0]
+    missing = [
+        d
+        for d in DEPS_REQUIRED
+        if subprocess.run(["which", d], capture_output=True).returncode != 0
+    ]
 
     if missing:
         err(f"Missing dependencies: {', '.join(missing)}")
@@ -201,7 +226,7 @@ def check_dependencies():
     subprocess.run(["sudo", "-v"], check=True)
     subprocess.run(
         ["sudo", "chown", "-R", f"{os.getenv('USER')}:{os.getenv('USER')}", APP_DIR],
-        check=True
+        check=True,
     )
     ok("Dependencies AMAN!")
 
@@ -209,6 +234,7 @@ def check_dependencies():
 # ─────────────────────────────────────────────────────────────
 # LOAD SHEET + CACHE
 # ─────────────────────────────────────────────────────────────
+
 
 def load_sheet(force_refresh: bool = False) -> list[dict]:
     """
@@ -249,17 +275,19 @@ def _parse_csv(path: Path) -> list[dict]:
 
         header_map = {h.strip().lower(): h for h in reader.fieldnames}
         col_unicode = _find_col(header_map, ["unicode"])
-        col_nama    = _find_col(header_map, ["nama lokasi - unicode", "nama lokasi"])
-        col_ip      = _find_col(header_map, ["ip zt", "ip"])
+        col_nama = _find_col(header_map, ["nama lokasi - unicode", "nama lokasi"])
+        col_ip = _find_col(header_map, ["ip zt", "ip"])
 
         if not all([col_unicode, col_nama, col_ip]):
-            err(f"Kolom ga ketemu — unicode={col_unicode}, nama={col_nama}, ip={col_ip}")
+            err(
+                f"Kolom ga ketemu — unicode={col_unicode}, nama={col_nama}, ip={col_ip}"
+            )
             sys.exit(1)
 
         for row in reader:
             raw_uni = row.get(col_unicode, "").strip()
-            nama    = row.get(col_nama, "").strip()
-            ip      = row.get(col_ip, "").strip()
+            nama = row.get(col_nama, "").strip()
+            ip = row.get(col_ip, "").strip()
 
             if not ip or not raw_uni:
                 continue
@@ -267,13 +295,15 @@ def _parse_csv(path: Path) -> list[dict]:
             # Paksa lowercase & 3 digit di sini, bre
             uni_padded = pad_unicode(raw_uni)
 
-            rows.append({
-                "unicode":  uni_padded,
-                "unicode_raw": raw_uni,
-                "nama":     nama,
-                "ip":       ip,
-                "ip_masked": mask_ip(ip),
-            })
+            rows.append(
+                {
+                    "unicode": uni_padded,
+                    "unicode_raw": raw_uni,
+                    "nama": nama,
+                    "ip": ip,
+                    "ip_masked": mask_ip(ip),
+                }
+            )
     return rows
 
 
@@ -288,12 +318,9 @@ def _find_col(header_map: dict, candidates: list[str]) -> str | None:
 # LOCATION SELECTOR — FZF FUZZY
 # ─────────────────────────────────────────────────────────────
 
+
 def select_location(rows: list[dict]) -> dict | None:
-    HEADER = (
-        f"{'UNICODE':<10}"
-        f"| {'LOCATION NAME':<65}"
-        f"| {'IP (MASKED)':<20}"
-    )
+    HEADER = f"{'UNICODE':<10}| {'LOCATION NAME':<65}| {'IP (MASKED)':<20}"
 
     lines = []
     row_map: dict[str, dict] = {}
@@ -303,11 +330,7 @@ def select_location(rows: list[dict]) -> dict | None:
         nama = r["nama"][:65].ljust(65)
         masked = r["ip_masked"].ljust(20)
 
-        display_line = (
-            f"{uni:<10}"
-            f"| {nama}"
-            f"| {masked}"
-        )
+        display_line = f"{uni:<10}| {nama}| {masked}"
 
         lines.append(display_line)
         row_map[uni] = r
@@ -325,21 +348,16 @@ def select_location(rows: list[dict]) -> dict | None:
             "--border",
             "--layout=reverse",
             "--info=inline",
-
             # separator kolom
             "--delimiter=|",
-
             # search unicode + nama lokasi
             "--nth=1,2",
-
             # tampilkan semua kolom
             "--with-nth=1,2,3",
-
             "--prompt=SEARCH > ",
             f"--header={HEADER}",
-
             "--tiebreak=begin,length",
-        ]
+        ],
     )
 
     if not result:
@@ -353,10 +371,7 @@ def select_location(rows: list[dict]) -> dict | None:
         if selected_row:
             return selected_row
 
-        err(
-            f"Data lokasi dengan unicode '{selected_uni}' "
-            f"ga ketemu di master data"
-        )
+        err(f"Data lokasi dengan unicode '{selected_uni}' ga ketemu di master data")
         return None
 
     except Exception as e:
@@ -368,13 +383,19 @@ def select_location(rows: list[dict]) -> dict | None:
 # VERSION CHECK — concurrent
 # ─────────────────────────────────────────────────────────────
 
+
 def _fetch_agent_version(ip: str) -> str:
     cmd = [
-        "sshpass", "-p", SSH_PASS,
+        "sshpass",
+        "-p",
+        SSH_PASS,
         "ssh",
-        "-o", "StrictHostKeyChecking=no",
-        "-o", "LogLevel=ERROR",
-        "-o", f"ConnectTimeout={SSH_TIMEOUT}",
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        "LogLevel=ERROR",
+        "-o",
+        f"ConnectTimeout={SSH_TIMEOUT}",
         f"{SSH_USER}@{ip}",
         f"unzip -p '{AGENT_JAR_PATH}' META-INF/MANIFEST.MF 2>/dev/null "
         f"| grep 'Implementation-Version' | cut -d: -f2 | tr -d ' \\r'",
@@ -401,14 +422,13 @@ def check_versions(ip: str) -> tuple[str, str, str]:
 
     with ThreadPoolExecutor(max_workers=3) as ex:
         fut_agent = ex.submit(_fetch_agent_version, ip)
-        fut_ws    = ex.submit(_fetch_actuator_version, ip, 9005)
-        fut_fs    = ex.submit(_fetch_actuator_version, ip, 8888)
+        fut_ws = ex.submit(_fetch_actuator_version, ip, 9005)
+        fut_fs = ex.submit(_fetch_actuator_version, ip, 8888)
 
         agent_ver = fut_agent.result()
-        ws_ver    = fut_ws.result()
-        fs_ver    = fut_fs.result()
+        ws_ver = fut_ws.result()
+        fs_ver = fut_fs.result()
 
-    
     ver_table = Table(show_header=False, box=None, padding=(0, 1))
     ver_table.add_column(style=GREY)
     ver_table.add_column(style=YELLOW)
@@ -425,11 +445,11 @@ def check_versions(ip: str) -> tuple[str, str, str]:
 # PING / STATS
 # ─────────────────────────────────────────────────────────────
 
+
 def show_stats(ip: str, ip_masked: str):
     try:
         r = subprocess.run(
-            ["ping", "-c", "1", "-W", "1", ip],
-            capture_output=True, text=True
+            ["ping", "-c", "1", "-W", "1", ip], capture_output=True, text=True
         )
         if "time=" in r.stdout:
             ping_ms = r.stdout.split("time=")[1].split()[0]
@@ -442,15 +462,20 @@ def show_stats(ip: str, ip_masked: str):
     stats_table.add_column(style=GREY)
     stats_table.add_column(style="white")
     stats_table.add_row("IP (masked) :", ip_masked)
-    stats_table.add_row("PING        :", f"{ping_ms} ms" if ping_ms != "OFFLINE" else "[red]OFFLINE[/]")
+    stats_table.add_row(
+        "PING        :", f"{ping_ms} ms" if ping_ms != "OFFLINE" else "[red]OFFLINE[/]"
+    )
     stats_table.add_row("SSH USER    :", SSH_USER)
 
-    console.print(Panel(stats_table, title="TARGET STATUS", border_style=PURPLE, padding=(0, 2)))
+    console.print(
+        Panel(stats_table, title="TARGET STATUS", border_style=PURPLE, padding=(0, 2))
+    )
 
 
 # ─────────────────────────────────────────────────────────────
 # RSYNC
 # ─────────────────────────────────────────────────────────────
+
 
 def sync_files(ip: str) -> bool:
     console.print(f"\n[bold {PINK}]  RSYNC Files from Remote[/]")
@@ -464,11 +489,17 @@ def sync_files(ip: str) -> bool:
         info(f"Syncing: [bold]{fname}[/]")
 
         cmd = [
-            "sudo", "sshpass", "-p", SSH_PASS,
-            "rsync", "-az", "--info=progress2",
-            "-e", f"ssh {SSH_OPTS}",
+            "sudo",
+            "sshpass",
+            "-p",
+            SSH_PASS,
+            "rsync",
+            "-az",
+            "--info=progress2",
+            "-e",
+            f"ssh {SSH_OPTS}",
             f"{SSH_USER}@{ip}:{file_path}",
-            f"{APP_DIR}/"
+            f"{APP_DIR}/",
         ]
 
         rc = subprocess.call(cmd)
@@ -477,7 +508,7 @@ def sync_files(ip: str) -> bool:
         else:
             err(f"{fname} failed (exit code: {rc})")
             all_ok = False
-            break  
+            break
 
     return all_ok
 
@@ -485,6 +516,7 @@ def sync_files(ip: str) -> bool:
 # ─────────────────────────────────────────────────────────────
 # UPDATE PROPERTIES
 # ─────────────────────────────────────────────────────────────
+
 
 def pull_remote_properties(ip: str) -> bool:
     """
@@ -499,11 +531,16 @@ def pull_remote_properties(ip: str) -> bool:
     props_path.parent.mkdir(parents=True, exist_ok=True)
 
     cmd = [
-        "sshpass", "-p", SSH_PASS,
+        "sshpass",
+        "-p",
+        SSH_PASS,
         "scp",
-        "-o", "StrictHostKeyChecking=no",
-        "-o", "LogLevel=ERROR",
-        "-o", f"ConnectTimeout={SSH_TIMEOUT}",
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        "LogLevel=ERROR",
+        "-o",
+        f"ConnectTimeout={SSH_TIMEOUT}",
         f"{SSH_USER}@{ip}:{REMOTE_PROPS_PATH}",
         str(props_path),
     ]
@@ -577,16 +614,16 @@ def update_properties(ip: str, unicode_code: str) -> bool:
     # Semua key lain (dbPort, ftp.*, minio.accesskey, qiqo.*, dll)
     # sudah ada dari pull_remote_properties — jangan di-touch
     updates = {
-        "serverHost":             ip,
-        "dbHost":                 ip,
-        "wsHost":                 ip,
-        "kafkaHost":              ip,
-        "redisHost":              ip,
-        "minio.endpoint":         f"http://{ip}:9000",
-        "fisherman.host":         ip,
-        "db":                     f"agent_{unicode_code}",
-        "username":               "agent",
-        "password":               f"{unicode_code}545115",
+        "serverHost": ip,
+        "dbHost": ip,
+        "wsHost": ip,
+        "kafkaHost": ip,
+        "redisHost": ip,
+        "minio.endpoint": f"http://{ip}:9000",
+        "fisherman.host": ip,
+        "db": f"agent_{unicode_code}",
+        "username": "agent",
+        "password": f"{unicode_code}545115",
         "credential.information": "",  # ini kosong kan buat lokal yak? bener ga gue akwakwka
     }
 
@@ -651,7 +688,9 @@ def update_properties(ip: str, unicode_code: str) -> bool:
             if fk in SENSITIVE_KEYS:
                 console.print(f"  [{RED}]{fk}[/] → expected [hidden], got [hidden]")
             else:
-                console.print(f"  [{RED}]{fk}[/] → expected [{GREEN}]{expected_val}[/], got [{RED}]{actual_val}[/]")
+                console.print(
+                    f"  [{RED}]{fk}[/] → expected [{GREEN}]{expected_val}[/], got [{RED}]{actual_val}[/]"
+                )
         err("Deployment aborted — fix server.properties permissions atau path dulu")
         return False
 
@@ -659,10 +698,7 @@ def update_properties(ip: str, unicode_code: str) -> bool:
 
     # Display diff — hide sensitive keys buat regulasi
     diff_table = Table(
-        show_header=True,
-        header_style=f"bold {YELLOW}",
-        box=None,
-        padding=(0, 2)
+        show_header=True, header_style=f"bold {YELLOW}", box=None, padding=(0, 2)
     )
     diff_table.add_column("KEY", style=GREY, width=28)
     diff_table.add_column("FROM", style=RED)
@@ -674,12 +710,14 @@ def update_properties(ip: str, unicode_code: str) -> bool:
         else:
             diff_table.add_row(k, old_values.get(k, "(Not Found)"), new_v)
 
-    console.print(Panel(
-        diff_table,
-        title="Configuration Changes",
-        border_style=YELLOW,
-        padding=(0, 1)
-    ))
+    console.print(
+        Panel(
+            diff_table,
+            title="Configuration Changes",
+            border_style=YELLOW,
+            padding=(0, 1),
+        )
+    )
     info(f"{len(SENSITIVE_KEYS)} sensitive key(s) updated (hidden from display)")
 
     return True
@@ -688,6 +726,7 @@ def update_properties(ip: str, unicode_code: str) -> bool:
 # ─────────────────────────────────────────────────────────────
 # RUN AGENT — full JVM flags + background nohup + logging
 # ─────────────────────────────────────────────────────────────
+
 
 def run_agent() -> tuple[bool, Path]:
     log_file = LOG_DIR / f"agent-{time.strftime('%Y%m%d-%H%M%S')}.log"
@@ -768,17 +807,19 @@ FATAL_PATTERNS = [
     "BUILD FAILED",
 ]
 
+
 def wait_startup_log(log_file: Path, timeout: int = 60) -> bool:
     import re
+
     from rich.live import Live
     from rich.spinner import Spinner
 
     info(f"Tunggu agent startup men, bentar (max {timeout}s)...")
 
-    ok_re    = re.compile("|".join(STARTUP_OK_PATTERNS))
+    ok_re = re.compile("|".join(STARTUP_OK_PATTERNS))
     fatal_re = re.compile("|".join(FATAL_PATTERNS))
 
-    result_holder = {"status": None} 
+    result_holder = {"status": None}
 
     def _monitor():
         for i in range(1, timeout + 1):
@@ -815,9 +856,7 @@ def wait_startup_log(log_file: Path, timeout: int = 60) -> bool:
         i = 0
         while monitor_thread.is_alive():
             i += 1
-            live.update(
-                Text(f"  ⏳ waiting startup  {i}s", style=GREY)
-            )
+            live.update(Text(f"  ⏳ waiting startup  {i}s", style=GREY))
             time.sleep(0.25)
         monitor_thread.join()
 
@@ -840,10 +879,11 @@ def wait_startup_log(log_file: Path, timeout: int = 60) -> bool:
         err("Fatal error detected in agent log")
         _tail_log(log_file, lines=5)
         return False
-    else:  
-        still_running = subprocess.run(
-            ["pgrep", "-f", JAR_NAME], capture_output=True
-        ).returncode == 0
+    else:
+        still_running = (
+            subprocess.run(["pgrep", "-f", JAR_NAME], capture_output=True).returncode
+            == 0
+        )
         status_str = "still running" if still_running else "not found"
         err(f"Startup timeout after {timeout}s — process {status_str}")
         if log_file.exists():
@@ -854,10 +894,9 @@ def wait_startup_log(log_file: Path, timeout: int = 60) -> bool:
 def _tail_log(log_file: Path, lines: int = 5):
     content = log_file.read_text(errors="replace").splitlines()
     filtered = [
-        l for l in content
-        if not l.strip().startswith("at ")
-        and l.strip()
-        and "Gdk-WARNING" not in l
+        l
+        for l in content
+        if not l.strip().startswith("at ") and l.strip() and "Gdk-WARNING" not in l
     ]
     tail = filtered[-lines:]
     console.print(f"\n[{GREY}]  --- last {lines} log lines ---[/]")
@@ -870,6 +909,7 @@ def _tail_log(log_file: Path, lines: int = 5):
 # ─────────────────────────────────────────────────────────────
 
 LATEST_LOG: Path | None = None
+
 
 def deploy(ip: str, unicode_code: str, nama: str) -> bool:
     global LATEST_LOG
@@ -915,6 +955,7 @@ def deploy(ip: str, unicode_code: str, nama: str) -> bool:
 # LOCATION INFO PANEL
 # ─────────────────────────────────────────────────────────────
 
+
 def show_location_panel(loc: dict):
     loc_table = Table(show_header=False, box=None, padding=(0, 1))
     loc_table.add_column(style=GREY)
@@ -923,16 +964,19 @@ def show_location_panel(loc: dict):
     loc_table.add_row("LOCATION :", loc["nama"])
     loc_table.add_row("IP       :", loc["ip_masked"])
 
-    console.print(Panel(
-        loc_table,
-        border_style=PINK,
-        padding=(0, 2),
-    ))
+    console.print(
+        Panel(
+            loc_table,
+            border_style=PINK,
+            padding=(0, 2),
+        )
+    )
 
 
 # ─────────────────────────────────────────────────────────────
 # MAIN MENU
 # ─────────────────────────────────────────────────────────────
+
 
 def main_menu() -> str | None:
     return questionary.select(
@@ -951,10 +995,12 @@ def main_menu() -> str | None:
 # MAIN
 # ─────────────────────────────────────────────────────────────
 
+
 def main():
     def _sigint(sig, frame):
         console.print(f"\n\n[{PINK}]  Disconnecting...[/]\n")
         sys.exit(0)
+
     signal.signal(signal.SIGINT, _sigint)
 
     check_dependencies()
@@ -1003,11 +1049,13 @@ def main():
                 result_text.append("NEMBAK AGENT SUCCESS\n\n", style=f"bold {GREEN}")
                 result_text.append(f"{loc['nama']}\n", style="white")
                 result_text.append(loc["ip_masked"], style=GREY)
-                console.print(Panel(
-                    Align.center(result_text),
-                    border_style=GREEN,
-                    padding=(1, 4),
-                ))
+                console.print(
+                    Panel(
+                        Align.center(result_text),
+                        border_style=GREEN,
+                        padding=(1, 4),
+                    )
+                )
                 # Print non-sensitive applied config
                 console.print(f"\n[{GREY}]Applied config:[/]")
                 for key in ["serverHost", "wsHost"]:
@@ -1020,11 +1068,13 @@ def main():
                 result_text.append("NEMBAK AGENT GAGAL\n\n", style=f"bold {RED}")
                 if LATEST_LOG:
                     result_text.append(f"CHECK LOG: {LATEST_LOG}", style=GREY)
-                console.print(Panel(
-                    Align.center(result_text),
-                    border_style=RED,
-                    padding=(1, 4),
-                ))
+                console.print(
+                    Panel(
+                        Align.center(result_text),
+                        border_style=RED,
+                        padding=(1, 4),
+                    )
+                )
 
         elif option == "Refresh Location Cache":
             CACHE_FILE.unlink(missing_ok=True)

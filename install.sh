@@ -2,7 +2,7 @@
 
 # ─────────────────────────────────────────────────────────────
 # GASAK ENGINE TOOLCHAIN — SYSTEM INSTALLER
-# Target Environment: Ubuntu 22.04, Debian, & Linux Mint
+# Target Environment: Ubuntu 22.04, Debian, & Linux Mint (Baru itu sii)
 # ─────────────────────────────────────────────────────────────
 
 set -uo pipefail
@@ -60,11 +60,9 @@ else
     echo -e "  ${YELLOW}!${RESET}  Unknown Linux Distribution"
 fi
 
-# Pastikan path instalasi siap
 mkdir -p "$INSTALL_DIR"
 mkdir -p "$CONFIG_DIR"
 
-# Cek dependensi core sistem
 for cmd in curl python3 pip3 openssl; do
     if command -v "$cmd" &>/dev/null; then
         echo -e "  ${GREEN}✔${RESET}  Command '${cmd}' ready"
@@ -125,7 +123,6 @@ for file in "${COMPONENTS[@]}"; do
     fi
 done
 
-# Sync environment template if missing
 if [ ! -f "$ENV_PATH" ]; then
     echo -e "  ${DIM}Initializing default configuration space...${RESET}"
     cat << 'EOF' > "$ENV_PATH"
@@ -160,7 +157,7 @@ rm -f "$PRIV_KEY_FILE" "$PUB_KEY_FILE" "$VAULT_FILE"
 echo -e "  ${DIM}Generating local asymmetric identity keypair...${RESET}"
 ssh-keygen -t rsa -b 2048 -m PEM -f "$PRIV_KEY_FILE" -N "" &>/dev/null
 
-# 3. Ekstrak Public Key ke format PKCS#8 murni pake OpenSSL (Dijamin kompatibel 100% sama server pusat)
+# 3. Ekstrak Public Key ke format PKCS#8 murni pake OpenSSL
 if [ -f "$PRIV_KEY_FILE" ]; then
     openssl rsa -in "$PRIV_KEY_FILE" -pubout -out "$PUB_KEY_FILE" &>/dev/null
     echo -e "  ${GREEN}✔${RESET}  RSA Identity generated successfully"
@@ -170,13 +167,10 @@ fi
 if [ -f "$PUB_KEY_FILE" ]; then
     echo -e "  ${DIM}Registering public key signature to Central Server...${RESET}"
 
-    # FIX CRITICAL: Menghapus header/footer PEM dan menyatukan seluruh baris key menjadi satu string lurus murni tanpa newline/space
     PURE_KEY=$(grep -v -- "-----" "$PUB_KEY_FILE" | tr -d '\n' | tr -d '\r' | tr -d ' ')
 
-    # Bungkus ke JSON payload secara presisi
     JSON_PAYLOAD=$(printf '{"token":"%s","public_key":"%s"}' "$GASAK_DIST_TOKEN" "$PURE_KEY")
 
-    # Ambil bundle vault dari central server
     HTTP_STATUS=$(curl -s -o "$VAULT_FILE" -w "%{http_code}" \
         -X POST \
         -H "Content-Type: application/json" \
@@ -208,7 +202,6 @@ if [ -n "$SHELL_RC" ] && [ -f "$SHELL_RC" ]; then
     fi
 fi
 
-# Pastikan permission owner mutlak milik real user
 chown -R "${REAL_USER}:${REAL_USER}" "$INSTALL_DIR" "$CONFIG_DIR" 2>/dev/null
 
 # ─── POST-INSTALLATION REPORT ──────────────────────────────────
