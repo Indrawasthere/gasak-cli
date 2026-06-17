@@ -14,9 +14,14 @@ VAULT_PORT="9002"
 GASAK_DIST_TOKEN="gsk_dist_9f2k7x"
 BASE_URL="http://${SERVER_IP}:${SERVER_PORT}"
 VAULT_URL="http://${SERVER_IP}:${VAULT_PORT}"
-INSTALL_DIR="$HOME/gasak-dist"
+
+# AUTO-DETECT REAL USER HOME PATH (Menghindari conflict beda session user)
+REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "$USER")}"
+REAL_HOME=$(eval echo "~$REAL_USER")
+
+INSTALL_DIR="${REAL_HOME}/gasak-dist"
 ENV_PATH="${INSTALL_DIR}/.env"
-CONFIG_DIR="$HOME/.config/gasak"
+CONFIG_DIR="${REAL_HOME}/.config/gasak"
 
 # ─── COLORS ───────────────────────────────────────────────────
 GREEN='\033[0;32m'
@@ -34,7 +39,7 @@ echo -e "${CYAN}"
 cat << 'BANNER'
   ██████╗  █████╗ ███████╗ █████╗ ██╗  ██╗
   ██╔════╝ ██╔══██╗██╔════╝██╔══██╗██║ ██╔╝
-  ██║  ███╗███████║███████╗███████║█████╔╝
+  ██║   ███╗███████║███████╗███████║█████╔╝
   ██║   ██║██╔══██║╚════██║██╔══██║██╔═██╗
   ╚██████╔╝██║  ██║███████║██║  ██║██║  ██╗
    ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝
@@ -60,7 +65,7 @@ mkdir -p "$INSTALL_DIR"
 mkdir -p "$CONFIG_DIR"
 
 # Cek dependensi core sistem
-for cmd in curl python3 pip3; do
+for cmd in curl python3 pip3 openssl; do
     if command -v "$cmd" &>/dev/null; then
         echo -e "  ${GREEN}✔${RESET}  Command '${cmd}' ready"
     else
@@ -148,23 +153,25 @@ PUB_KEY_FILE="${CONFIG_DIR}/id_rsa.pub"
 PRIV_KEY_FILE="${CONFIG_DIR}/id_rsa"
 VAULT_FILE="${CONFIG_DIR}/vault"
 
-# 1. Generate Private Key jika belum ada
-if [ ! -f "$PRIV_KEY_FILE" ]; then
-    echo -e "  ${DIM}Generating local asymmetric identity keypair...${RESET}"
-    ssh-keygen -t rsa -b 2048 -f "$PRIV_KEY_FILE" -N "" &>/dev/null
-fi
+# 1. Hapus sisa keypair/vault lama biar ga konflik key mismatch pas reinstall
+rm -f "$PRIV_KEY_FILE" "$PUB_KEY_FILE" "$VAULT_FILE"
 
+# 2. Generate Private Key dengan FORMAT PEM STANDAR (PKCS#1)
+echo -e "  ${DIM}Generating local asymmetric identity keypair...${RESET}"
+ssh-keygen -t rsa -b 2048 -m PEM -f "$PRIV_KEY_FILE" -N "" &>/dev/null
+
+# 3. Ekstrak Public Key ke format PKCS#8 murni pake OpenSSL (Dijamin kompatibel 100% sama server pusat)
 if [ -f "$PRIV_KEY_FILE" ]; then
-    ssh-keygen -e -f "$PRIV_KEY_FILE" -m PKCS8 > "$PUB_KEY_FILE" 2>/dev/null
-    echo -e "  ${GREEN}✔${RESET}  RSA Identity (PEM PKCS#8) secured at ${CONFIG_DIR}"
+    openssl rsa -in "$PRIV_KEY_FILE" -pubout -out "$PUB_KEY_FILE" &>/dev/null
+    echo -e "  ${GREEN}✔${RESET}  RSA Identity generated successfully"
 fi
 
-# 3. Kirim ke Vault Server Pusat
+# 4. Kirim ke Vault Server Pusat
 if [ -f "$PUB_KEY_FILE" ]; then
     echo -e "  ${DIM}Registering public key signature to Central Server...${RESET}"
 
-    # Teknik stripping: buang text "---", hapus space & enter biar jadi plain text sebaris murni
-    PURE_KEY=$(grep -v -- "-----" "$PUB_KEY_FILE" | tr -d '\n' | tr -d ' ')
+    # FIX CRITICAL: Menghapus header/footer PEM dan menyatukan seluruh baris key menjadi satu string lurus murni tanpa newline/space
+    PURE_KEY=$(grep -v -- "-----" "$PUB_KEY_FILE" | tr -d '\n' | tr -d '\r' | tr -d ' ')
 
     # Bungkus ke JSON payload secara presisi
     JSON_PAYLOAD=$(printf '{"token":"%s","public_key":"%s"}' "$GASAK_DIST_TOKEN" "$PURE_KEY")
@@ -187,9 +194,9 @@ fi
 # ─── PATH INJECTION ───────────────────────────────────────────
 SHELL_RC=""
 if [[ "$SHELL" == */zsh ]]; then
-    SHELL_RC="$HOME/.zshrc"
+    SHELL_RC="${REAL_HOME}/.zshrc"
 elif [[ "$SHELL" == */bash ]]; then
-    SHELL_RC="$HOME/.bashrc"
+    SHELL_RC="${REAL_HOME}/.bashrc"
 fi
 
 if [ -n "$SHELL_RC" ] && [ -f "$SHELL_RC" ]; then
@@ -201,6 +208,9 @@ if [ -n "$SHELL_RC" ] && [ -f "$SHELL_RC" ]; then
     fi
 fi
 
+# Pastikan permission owner mutlak milik real user
+chown -R "${REAL_USER}:${REAL_USER}" "$INSTALL_DIR" "$CONFIG_DIR" 2>/dev/null
+
 # ─── POST-INSTALLATION REPORT ──────────────────────────────────
 echo "------------------------------------------------------------------"
 echo -e "${GREEN}${BOLD}INSTALLATION COMPLETED SUCCESSFULLY!${RESET}"
@@ -211,11 +221,8 @@ if [ -f "$VAULT_FILE" ] && grep -q "payload" "$VAULT_FILE" 2>/dev/null; then
     echo -e "  ${GREEN}✔${RESET}  Encrypted Storage : Active"
     echo -e "  ${GREEN}✔${RESET}  Asymmetric Identity: ${CONFIG_DIR}/id_rsa"
     echo -e "  ${GREEN}✔${RESET}  Local Storage Security: Pure zero-plaintext disk architecture"
-    VAULT_OK=true
 else
-    echo -e "  ${BOLD}VAULT INFRASTRUCTURE STATUS${RESET}"
     echo -e "  ${YELLOW}!${RESET}  Encrypted Storage : Non-active (Operating under .env local fallback mode)"
-    VAULT_OK=false
 fi
 
 echo ""
