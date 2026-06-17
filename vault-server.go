@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -81,39 +80,36 @@ func main() {
 
 func handleGetEnv(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		logAccess(r, 452, "INVALID METHOD")
+		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 
-	var req ClientRequest
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+	var req struct {
+		Token     string `json:"token"`
+		PublicKey string `json:"public_key"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	if err := json.Unmarshal(body, &req); err != nil {
-		http.Error(w, "Invalid JSON structure", http.StatusBadRequest)
-		logAccess(r, 400, "BAD JSON")
+	// Validasi token distribusi biar ga sembarang orang bisa nembak vault
+	if req.Token != "gsk_dist_9f2k7x" {
+		w.WriteHeader(http.StatusUnauthorized)
+		logAccess(r, http.StatusUnauthorized, "Token distribusi tidak valid")
 		return
 	}
 
-	// Validasi Token Distribusi
-	expectedToken := os.Getenv("GASAK_DIST_TOKEN")
-	if expectedToken == "" || req.Token != expectedToken {
-		http.Error(w, "Forbidden: Token Mismatch", http.StatusForbidden)
-		logAccess(r, 403, "TOKEN MISMATCH")
-		return
+	// PEMBERSIH UTK PUBLIC KEY PEM
+	pubKeyStr := req.PublicKey
+	pubKeyStr = strings.ReplaceAll(pubKeyStr, `\n`, "\n")
+	pubKeyStr = strings.TrimSpace(pubKeyStr)
+	if !strings.Contains(pubKeyStr, "BEGIN PUBLIC KEY") {
+		pubKeyStr = fmt.Sprintf("-----BEGIN PUBLIC KEY-----\n%s\n-----END PUBLIC KEY-----", pubKeyStr)
 	}
 
-	if req.PublicKey == "" {
-		http.Error(w, "Bad Request: Missing Public Key", http.StatusBadRequest)
-		logAccess(r, 400, "MISSING PUBKEY")
-		return
-	}
-
-	// Load secrets dari env server
+	// Load seluruh data .env sakti dari server supeng ke struct
 	secrets := SecretPayload{
 		GLPIUrl:       os.Getenv("GLPI_URL"),
 		OutlineURL:    os.Getenv("OUTLINE_URL"),
@@ -122,26 +118,28 @@ func handleGetEnv(w http.ResponseWriter, r *http.Request) {
 		SshUser:       os.Getenv("PARKEE_SSH_USER"),
 		SshPass:       os.Getenv("PARKEE_SSH_PASS"),
 		CmsDbHost:     os.Getenv("CMS_DB_HOST"),
-		CmsDbPort:     getEnvDefault("CMS_DB_PORT", "5432"),
+		CmsDbPort:     os.Getenv("CMS_DB_PORT"),
 		CmsDbUser:     os.Getenv("CMS_DB_USER"),
 		CmsDbPass:     os.Getenv("CMS_DB_PASS"),
 		CmsDbName:     os.Getenv("CMS_DB_NAME"),
 	}
 
-	plaintext, _ := json.Marshal(secrets)
-
-	// Lakukan Enkripsi Hybrid menggunakan Public Key Client
-	vaultData, err := encryptHybrid(plaintext, req.PublicKey)
+	plaintext, err := json.Marshal(secrets)
 	if err != nil {
-		http.Error(w, "Internal Server Error: Encryption Failed", http.StatusInternalServerError)
-		logAccess(r, 500, "CRYPTO ERROR: "+err.Error())
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	// Jalankan Hybrid Encryption (Bungkus payload pake Public Key si client)
+	outbound, err := encryptHybrid(plaintext, pubKeyStr)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"` + err.Error() + `"}`))
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(vaultData)
-	logAccess(r, 200, "VAULT COMPILED & DISPATCHED ASYMMETRICALLY")
+	_ = json.NewEncoder(w).Encode(outbound)
 }
 
 func encryptHybrid(plaintext []byte, pubKeyPEM string) (*OutboundVault, error) {

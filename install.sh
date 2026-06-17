@@ -161,11 +161,15 @@ fi
 
 # 3. Kirim ke Vault Server Pusat
 if [ -f "$PUB_KEY_FILE" ]; then
-    PUB_KEY_CONTENT=$(awk '{printf "%s\\n", $0}' "$PUB_KEY_FILE")
     echo -e "  ${DIM}Registering public key signature to Central Server...${RESET}"
 
-    JSON_PAYLOAD=$(printf '{"token":"%s","public_key":"%s"}' "$GASAK_DIST_TOKEN" "$PUB_KEY_CONTENT")
+    # Teknik stripping: buang text "---", hapus space & enter biar jadi plain text sebaris murni
+    PURE_KEY=$(grep -v -- "-----" "$PUB_KEY_FILE" | tr -d '\n' | tr -d ' ')
 
+    # Bungkus ke JSON payload secara presisi
+    JSON_PAYLOAD=$(printf '{"token":"%s","public_key":"%s"}' "$GASAK_DIST_TOKEN" "$PURE_KEY")
+
+    # Ambil bundle vault dari central server
     HTTP_STATUS=$(curl -s -o "$VAULT_FILE" -w "%{http_code}" \
         -X POST \
         -H "Content-Type: application/json" \
@@ -178,8 +182,6 @@ if [ -f "$PUB_KEY_FILE" ]; then
         echo -e "  ${YELLOW}!${RESET}  Server registration rejected (Code: ${HTTP_STATUS}) — Falling back to .env mode"
         rm -f "$VAULT_FILE"
     fi
-else
-    echo -e "  ${RED}✘${RESET}  Failed to format RSA Identity inside local system path"
 fi
 
 # ─── PATH INJECTION ───────────────────────────────────────────
