@@ -190,7 +190,8 @@ func encryptHybrid(plaintext []byte, pubKeyPEM string) (*OutboundVault, error) {
 		return nil, fmt.Errorf("failed to envelope key: %w", err)
 	}
 
-	return &OutboundVault{\n\t\tEncryptedKey: hex.EncodeToString(encryptedKey),
+	return &OutboundVault{
+		EncryptedKey: hex.EncodeToString(encryptedKey),
 		Payload:      hex.EncodeToString(ciphertext),
 		Nonce:        hex.EncodeToString(nonce),
 	}, nil
