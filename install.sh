@@ -253,7 +253,12 @@ DOWNLOAD_FAILED=()
 
 for file in "${FILES_TO_DOWNLOAD[@]}"; do
     printf "    → %-35s " "${file}..."
-    if curl -fsSL --max-time 60 --connect-timeout 10 \
+    if [ "$file" = "gasak" ]; then
+            CURL_TIMEOUT=600
+        else
+            CURL_TIMEOUT=60
+        fi
+    if curl -fsSL --max-time "$CURL_TIMEOUT" --connect-timeout 15 \
         "${BASE_URL}/${file}" -o "${INSTALL_DIR}/${file}" 2>/dev/null; then
         FILESIZE=$(du -sh "${INSTALL_DIR}/${file}" 2>/dev/null | cut -f1 || echo "?")
         echo -e "${GREEN}OK (${FILESIZE})${RESET}"
@@ -264,11 +269,11 @@ for file in "${FILES_TO_DOWNLOAD[@]}"; do
 done
 
 if [ ${#DOWNLOAD_FAILED[@]} -ne 0 ]; then
-    err "File berikut gagal diunduh dari server."
+    err "File nya gagal di download nih men"
     exit 1
 fi
 
-ok "Semua komponen berhasil diunduh."
+ok "Nice, semua komponen aman"
 
 # ══════════════════════════════════════════════════════════════
 # STEP 6 — ENROLLMENT & VAULT SECURING (UPGRADED CRYPTO LOCK)
