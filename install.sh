@@ -78,7 +78,6 @@ done
 echo -e "\n${BOLD}[2/4] Syncing Python Dependencies${RESET}"
 echo -e "  ${DIM}Installing mandatory packages via pip...${RESET}"
 
-# Prevent error externally managed environment di OS modern (Ubuntu 23+)
 PIP_FLAGS="--break-system-packages"
 if ! pip3 install $PIP_FLAGS --upgrade pip &>/dev/null; then
     PIP_FLAGS=""
@@ -145,14 +144,24 @@ fi
 # ─── VAULT REGISTRATION & SINKRONISASI ──────────────────────────
 echo -e "\n${BOLD}[4/4] Verifying Security Keypair & Local Vault Encryption${RESET}"
 
-# Jalankan gasak pertama kali untuk generate rsa internal keypair jika belum ada
-"${INSTALL_DIR}/gasak" --version &>/dev/null || true
-
 PUB_KEY_FILE="${CONFIG_DIR}/id_rsa.pub"
+PRIV_KEY_FILE="${CONFIG_DIR}/id_rsa"
 VAULT_FILE="${CONFIG_DIR}/vault"
 
+# 1. Generate Private Key jika belum ada
+if [ ! -f "$PRIV_KEY_FILE" ]; then
+    echo -e "  ${DIM}Generating local asymmetric identity keypair...${RESET}"
+    ssh-keygen -t rsa -b 2048 -f "$PRIV_KEY_FILE" -N "" &>/dev/null
+fi
+
+if [ -f "$PRIV_KEY_FILE" ]; then
+    ssh-keygen -e -f "$PRIV_KEY_FILE" -m PKCS8 > "$PUB_KEY_FILE" 2>/dev/null
+    echo -e "  ${GREEN}✔${RESET}  RSA Identity (PEM PKCS#8) secured at ${CONFIG_DIR}"
+fi
+
+# 3. Kirim ke Vault Server Pusat
 if [ -f "$PUB_KEY_FILE" ]; then
-    PUB_KEY_CONTENT=$(cat "$PUB_KEY_FILE")
+    PUB_KEY_CONTENT=$(awk '{printf "%s\\n", $0}' "$PUB_KEY_FILE")
     echo -e "  ${DIM}Registering public key signature to Central Server...${RESET}"
 
     JSON_PAYLOAD=$(printf '{"token":"%s","public_key":"%s"}' "$GASAK_DIST_TOKEN" "$PUB_KEY_CONTENT")
@@ -170,7 +179,7 @@ if [ -f "$PUB_KEY_FILE" ]; then
         rm -f "$VAULT_FILE"
     fi
 else
-    echo -e "  ${RED}✘${RESET}  RSA Identity missing inside local system path"
+    echo -e "  ${RED}✘${RESET}  Failed to format RSA Identity inside local system path"
 fi
 
 # ─── PATH INJECTION ───────────────────────────────────────────
