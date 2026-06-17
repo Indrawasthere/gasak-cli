@@ -59,6 +59,7 @@ type OutboundVault struct {
 	Nonce        string `json:"nonce"`
 }
 
+// Cukup dideklarasikan SEKALI di sini men biar gak bentrok redeclared error!
 type LocateResponse struct {
 	NamaLokasi string `json:"nama_lokasi"`
 	IPAddress  string `json:"ip_address"`
@@ -197,17 +198,12 @@ func encryptHybrid(plaintext []byte, pubKeyPEM string) (*OutboundVault, error) {
 	}, nil
 }
 
-type LocateResponse struct {
-	NamaLokasi string `json:"nama_lokasi"`
-	IPAddress  string `json:"ip_address"`
-}
-
 func handleLocateGate(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	// Validasi token internal distribusi
 	token := r.Header.Get("X-Gasak-Token")
-	if token != "gsk_dist_9f2k7x" { // ← Sesuai hardcoded token internal lu
+	if token != "gsk_dist_9f2k7x" {
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Unauthorized internal token!"})
 		return
@@ -241,31 +237,31 @@ func handleLocateGate(w http.ResponseWriter, r *http.Request) {
 
 	// UPGRADE: Query Sakti Gabungan (Filter IP 10.70.% + Join Reader Information)
 	query := `
-		SELECT
-			data_collection.user_pc,
-			(
-				SELECT trim(ip)
-				FROM unnest(string_to_array(data_collection.ip_address, ' ')) AS ip
-				WHERE ip LIKE '10.70.%'
-				LIMIT 1
-			) AS ip_address
-		FROM (
-			WITH ranked_data AS (
-				SELECT user_pc, app_version, ip_address,
-				       ROW_NUMBER() OVER (PARTITION BY user_pc ORDER BY created_at DESC) AS rn
-				FROM (
-					SELECT created_at, ip_address, user_pc, app_version
-					FROM core_user_activity
-					WHERE lower(user_pc) LIKE '%' || $1 || '%'
-					  AND deleted_at IS NULL
-					  AND action_type = 'LOGIN'
-					  AND created_at >= NOW() - INTERVAL '31 days'
-				) AS get_data
-			)
-			SELECT user_pc, app_version, ip_address FROM ranked_data WHERE rn = 1
-		) AS data_collection
-		INNER JOIN reader_information AS reader ON reader.pc_name = data_collection.user_pc
-		ORDER BY data_collection.app_version, data_collection.ip_address, data_collection.user_pc;`
+        SELECT
+            data_collection.user_pc,
+            (
+                SELECT trim(ip)
+                FROM unnest(string_to_array(data_collection.ip_address, ' ')) AS ip
+                WHERE ip LIKE '10.70.%'
+                LIMIT 1
+            ) AS ip_address
+        FROM (
+            WITH ranked_data AS (
+                SELECT user_pc, app_version, ip_address,
+                       ROW_NUMBER() OVER (PARTITION BY user_pc ORDER BY created_at DESC) AS rn
+                FROM (
+                    SELECT created_at, ip_address, user_pc, app_version
+                    FROM core_user_activity
+                    WHERE lower(user_pc) LIKE '%' || $1 || '%'
+                      AND deleted_at IS NULL
+                      AND action_type = 'LOGIN'
+                      AND created_at >= NOW() - INTERVAL '31 days'
+                ) AS get_data
+            )
+            SELECT user_pc, app_version, ip_address FROM ranked_data WHERE rn = 1
+        ) AS data_collection
+        INNER JOIN reader_information AS reader ON reader.pc_name = data_collection.user_pc
+        ORDER BY data_collection.app_version, data_collection.ip_address, data_collection.user_pc;`
 
 	rows, err := db.Query(query, strings.ToLower(keyword))
 	if err != nil {
