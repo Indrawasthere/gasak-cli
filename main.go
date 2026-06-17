@@ -24,7 +24,7 @@ const (
 	SpreadsheetID = "1A0ce374Dgw3pS4w05Yw9y1flJK5pZi6D-UUII6PG5VM"
 	SheetGID      = "463772829"
 
-	AppVersion = "1.1.13"
+	AppVersion = "1.1.14"
 )
 
 var (
@@ -50,6 +50,8 @@ func init() {
 	if secrets, err := loadVault(); err == nil {
 		applyVaultSecrets(secrets)
 		vaultLoaded = true
+	} else {
+		fmt.Fprintf(os.Stderr, "[VAULT] Gagal load vault: %v — fallback ke .env\n", err)
 	}
 
 	// ── Priority 2: .env fallback ─────────────────────────────────
@@ -1642,17 +1644,18 @@ func scpFile(tpUser *TeleportUser, loc *Location, remotePath string, filename st
 
 type GateInfo struct {
 	UserPC string
-	IP     string // IP LAN pertama dari kolom ip_address
+	IP     string
 }
 
 // queryGatesFromDB SSH ke server main, query postgres, return list gate (yang aktif doang tapi)
 func queryGatesFromDB(tpUser *TeleportUser, loc *Location) ([]GateInfo, error) {
 	uni := strings.ToLower(loc.Unicode)
-	dbName := "agent_" + uni // Merakit nama database langsung lewat variabel aman
+	dbName := "agent_" + uni
 
-	// Heredoc gak survive SSH one-liner — pakai -c dengan single-line SQL
-	// dbName dari concatenation aman (lowercase unicode, no injection surface)
-	sql := "SELECT DISTINCT ON (user_pc) user_pc, ip_address FROM (SELECT user_pc, ip_address, created_at FROM core_user_activity WHERE lower(user_pc) LIKE '%' || (SELECT lower(unique_code) FROM location) || '%' AND deleted_at IS NULL AND action_type = 'LOGIN' AND created_at >= NOW() - INTERVAL '31 days') AS get_data ORDER BY user_pc, created_at DESC;"
+	sql := fmt.Sprintf(
+		"SELECT DISTINCT ON (user_pc) user_pc, ip_address FROM (SELECT user_pc, ip_address, created_at FROM core_user_activity WHERE lower(user_pc) LIKE '%%%%%s%%%%' AND deleted_at IS NULL AND action_type = 'LOGIN' AND created_at >= NOW() - INTERVAL '31 days') AS get_data ORDER BY user_pc, created_at DESC;",
+		uni,
+	)
 	rawSQL := `psql -h localhost -U agent -d ` + dbName + ` -t -A -F'|' -c "` + sql + `"`
 
 	var out []byte
