@@ -240,7 +240,6 @@ for file in "${FILES_TO_DOWNLOAD[@]}"; do
     CURL_TIMEOUT=60
     [ "$file" = "gasak" ] && CURL_TIMEOUT=600
 
-    # Resume-capable download dengan retry
     MAX_RETRIES=3
     RETRY=0
     DOWNLOAD_OK=false
@@ -248,27 +247,40 @@ for file in "${FILES_TO_DOWNLOAD[@]}"; do
     while [ $RETRY -lt $MAX_RETRIES ]; do
         RETRY=$((RETRY + 1))
         PARTIAL="${INSTALL_DIR}/${file}.partial"
+        rm -f "${PARTIAL}"
 
-        # -C - = resume dari byte terakhir kalau file partial ada
-        if curl -fsSL --max-time "$CURL_TIMEOUT" --connect-timeout 15 \
-            -C - \
-            "${BASE_URL}/${file}" -o "${PARTIAL}" 2>/dev/null; then
-
-            # Verifikasi file tidak kosong
-            if [ -s "${PARTIAL}" ]; then
-                mv "${PARTIAL}" "${INSTALL_DIR}/${file}"
-                FILESIZE=$(du -sh "${INSTALL_DIR}/${file}" 2>/dev/null | cut -f1 || echo "?")
-                printf "  ${GREEN}✔${RESET}  %-30s ${DIM}%s${RESET}\n" "${file}" "(${FILESIZE})"
-                DOWNLOAD_OK=true
-                break
+        if [ "$file" = "gasak" ]; then
+            # Binary gede — tampilkan progress bar biar user ga kira hang
+            echo -e "  ${CYAN}→${RESET}  Downloading ${file} ${DIM}(ini agak lama, jangan di-Ctrl+C ya men...)${RESET}"
+            if curl -f --max-time "$CURL_TIMEOUT" --connect-timeout 15 \
+                --progress-bar \
+                "${BASE_URL}/${file}" -o "${PARTIAL}" 2>&1 | sed 's/^/     /'; then
+                DOWNLOAD_STATUS=${PIPESTATUS[0]}
             else
-                warn "File kosong, retry ${RETRY}/${MAX_RETRIES}..."
-                rm -f "${PARTIAL}"
+                DOWNLOAD_STATUS=1
             fi
         else
-            [ $RETRY -lt $MAX_RETRIES ] && warn "${file} gagal, retry ${RETRY}/${MAX_RETRIES}..." || true
+            # File kecil — silent aja
+            if curl -fsSL --max-time "$CURL_TIMEOUT" --connect-timeout 15 \
+                "${BASE_URL}/${file}" -o "${PARTIAL}" 2>/dev/null; then
+                DOWNLOAD_STATUS=0
+            else
+                DOWNLOAD_STATUS=1
+            fi
+        fi
+
+        if [ "$DOWNLOAD_STATUS" -eq 0 ] && [ -s "${PARTIAL}" ]; then
+            mv "${PARTIAL}" "${INSTALL_DIR}/${file}"
+            FILESIZE=$(du -sh "${INSTALL_DIR}/${file}" 2>/dev/null | cut -f1 || echo "?")
+            printf "  ${GREEN}✔${RESET}  %-30s ${DIM}%s${RESET}\n" "${file}" "(${FILESIZE})"
+            DOWNLOAD_OK=true
+            break
+        else
             rm -f "${PARTIAL}"
-            sleep 1
+            if [ $RETRY -lt $MAX_RETRIES ]; then
+                warn "${file} gagal, retry ${RETRY}/${MAX_RETRIES}..."
+                sleep 2
+            fi
         fi
     done
 
