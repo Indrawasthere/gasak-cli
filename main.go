@@ -24,7 +24,7 @@ const (
 	SpreadsheetID = "1A0ce374Dgw3pS4w05Yw9y1flJK5pZi6D-UUII6PG5VM"
 	SheetGID      = "463772829"
 
-	AppVersion = "1.1.12"
+	AppVersion = "1.1.13"
 )
 
 var (
