@@ -61,6 +61,7 @@ func main() {
 
 	http.HandleFunc("/getenv", handleGetEnv)
 	http.HandleFunc("/health", handleHealth)
+	http.HandleFunc("/api/locate-gate", handleLocateGate)
 
 	err := http.ListenAndServe(fmt.Sprintf(":%d", VaultPort), nil)
 	if err != nil {
@@ -211,4 +212,87 @@ func getEnvDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+
+import (
+	"database/sql" // Pastikan library sql sudah di-import di atas berkas vault-server.go
+	_ "github.com/lib/pq" // Pastikan driver postgresql di-import di server pusat
+)
+
+type LocateResponse struct {
+	NamaLokasi string `json:"nama_lokasi"`
+	IPAddress  string `json:"ip_address"`
+}
+
+func handleLocateGate(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Validasi token distribusi sederhana biar ga sembarang orang nembak query
+	token := r.Header.Get("X-Gasak-Token")
+	if token != "gsk_dist_9f2k7x" {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Unauthorized men!"})
+		return
+	}
+
+	keyword := r.URL.Query().Get("keyword")
+	if keyword == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Butuh parameter keyword lokasi!"})
+		return
+	}
+
+	// Load DB config server pusat langsung dari system env server
+	dbHost := os.Getenv("CMS_DB_HOST")
+	dbPort := os.Getenv("CMS_DB_PORT")
+	dbUser := os.Getenv("CMS_DB_USER")
+	dbPass := os.Getenv("CMS_DB_PASS")
+	dbName := os.Getenv("CMS_DB_NAME")
+
+	if dbPort == "" { dbPort = "5432" }
+
+	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable", dbHost, dbPort, dbUser, dbPass, dbName)
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Gagal konek DB pusat: " + err.Error()})
+		return
+	}
+	defer db.Close()
+
+	// Query sakti dari lu yang udah dibungkus aman di server pusat
+	query := `
+		SELECT DISTINCT ON (user_pc)
+			user_pc AS nama_lokasi,
+			(
+				SELECT trim(ip)
+				FROM unnest(string_to_array(ip_address, ' ')) AS ip
+				WHERE ip LIKE '10.70.%'
+				LIMIT 1
+			) AS ip_address,
+			created_at AS last_seen
+		FROM (
+			SELECT user_pc, ip_address, created_at
+			FROM core_user_activity
+			WHERE lower(user_pc) LIKE $1
+			  AND deleted_at IS NULL
+			  AND action_type = 'LOGIN'
+			  AND created_at >= NOW() - INTERVAL '31 days'
+		) AS get_data
+		ORDER BY user_pc, created_at DESC LIMIT 1;`
+
+	var resp LocateResponse
+	var lastSeen time.Time
+
+	// Cari wildcard match query
+	searchTerm := "%" + strings.ToLower(keyword) + "%"
+	err = db.QueryRow(query, searchTerm).Scan(&resp.NamaLokasi, &resp.IPAddress, &lastSeen)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Lokasi tidak ditemukan atau data activity kosong 31 hari terakhir."})
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(resp)
 }

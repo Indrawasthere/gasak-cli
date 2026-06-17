@@ -1406,93 +1406,116 @@ func checkPythonTk() bool {
 }
 
 func runFetchLog(tpUser *TeleportUser) {
-	locs, err := loadLocations()
+	logInfo("Fitur Ambil Log Agent Berbasis Aktivitas Server")
+	fmt.Println(dimStyle.Render("  Mencari IP Gate secara aman via Server Pusat..."))
+	fmt.Println()
+
+	var keyword string
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Ketik Nama Lokasi / Unicode (Contoh: 'Biak' atau '0eu'):").
+				Value(&keyword),
+		),
+	).WithTheme(crushTheme())
+
+	if err := form.Run(); err != nil {
+		logWarn("Pengambilan log dibatalkan.")
+		return
+	}
+
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		logErr("Keyword lokasi gak boleh kosong men!")
+		return
+	}
+
+	// 1. Request IP dari server pusat tanpa support tau kredensial DB nya
+	client := &http.Client{Timeout: 5 * time.Second}
+	req, err := http.NewRequest("GET", fmt.Sprintf("http://10.70.0.110:9002/api/locate-gate?keyword=%s", keyword), nil)
 	if err != nil {
-		logErr("Gagal load data lokasi: " + err.Error())
+		logErr("Gagal membuat request: " + err.Error())
+		return
+	}
+	req.Header.Set("X-Gasak-Token", "gsk_dist_9f2k7x")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		logErr("Gagal menghubungi server pusat GASAK Vault: " + err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		logErr("Lokasi ga ketemu men atau gaada aktivitas login 31 hari terakhir!")
+		return
+	} else if resp.StatusCode != http.StatusOK {
+		logErr(fmt.Sprintf("Server mengembalikan error status: %d", resp.StatusCode))
 		return
 	}
 
-	// Step 1: Pilih Lokasi Terlebih Dahulu
-	var selectedUnicode string
-	var opts []huh.Option[string]
-	for _, l := range locs {
-		label := fmt.Sprintf("%-8s | %-45s | %s", l.Unicode, truncate(l.Nama, 45), l.IP)
-		opts = append(opts, huh.NewOption(label, l.Unicode))
+	var data struct {
+		NamaLokasi string `json:"nama_lokasi"`
+		IPAddress  string `json:"ip_address"`
 	}
-
-	locForm := huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Pilih lokasi target:").
-				Description(fmt.Sprintf("%d lokasi aktif ditemukan", len(locs))).
-				Options(opts...).
-				Value(&selectedUnicode).
-				Filtering(true),
-		),
-	).WithTheme(crushTheme())
-
-	if err := locForm.Run(); err != nil {
-		logWarn("Ambil log dibatalkan.")
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		logErr("Gagal membaca mapping data dari server pusat.")
 		return
 	}
 
-	var selected *Location
-	for _, l := range locs {
-		if l.Unicode == selectedUnicode {
-			selected = &l
-			break
-		}
-	}
-	if selected == nil {
-		logErr("Lokasi tidak valid.")
+	if data.IPAddress == "" {
+		logErr("Data IP Lokasi kosong di database pusat!")
 		return
 	}
 
-	fmt.Println()
+	clearScreen()
+	showMiniHeader()
+	logOK(fmt.Sprintf("Target Terdeteksi: %s (%s)", data.NamaLokasi, data.IPAddress))
 
-	// Step 2: Filter log mana saja yang boleh diakses berdasarkan Role (L1 vs L2)
-	var sourceOpts []huh.Option[string]
-	for _, src := range logSources {
-		// Jika log khusus L2 (PostgreSQL) tapi user-nya L1 (support), kita sembunyikan!
-		if src.AllowedForL2 && !tpUser.IsL2 {
-			continue
-		}
-		sourceOpts = append(sourceOpts, huh.NewOption(src.Name, src.Name))
-	}
-
-	var selectedSourceName string
-	sourceForm := huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title(fmt.Sprintf("Pilih tipe log untuk %s [%s]:", selected.Nama, selected.Unicode)).
-				Options(sourceOpts...).
-				Value(&selectedSourceName),
-		),
-	).WithTheme(crushTheme())
-
-	if err := sourceForm.Run(); err != nil {
-		logWarn("Ambil log dibatalkan.")
-		return
-	}
-
-	var chosenSource LogSource
-	for _, src := range logSources {
-		if src.Name == selectedSourceName {
-			chosenSource = src
-			break
-		}
-	}
-
-	fmt.Println()
-
-	// Step 3: Eksekusi penarikan berdasarkan type data
-	if chosenSource.IsAgentLog {
-		// Log ada di gate PC — perlu flow 2-hop via server main
-		fetchAgentGateLog(tpUser, selected, chosenSource.Path, chosenSource.Name)
-	} else if chosenSource.IsDir {
-		fetchLogFromDir(tpUser, selected, chosenSource.Path, chosenSource.Name)
+	// Ekstrak unicode otomatis dari nama lokasi buat login node teleport (Contoh: server-0eu)
+	// Kita cari pola 3 digit lokasi seperti 0eu, 0pv, dll
+	unicodeTarget := "0eu" // fallback default
+	re := regexp.MustCompile(`(?i)server-([a-z0-9]{3})`)
+	if match := re.FindStringSubmatch(data.NamaLokasi); len(match) > 1 {
+		unicodeTarget = strings.ToLower(match[1])
 	} else {
-		fetchSingleFile(tpUser, selected, chosenSource.Path, chosenSource.Name)
+		// Jika gaada text "server-xxx", coba ambil 3 huruf terakhir keyword atau sesuaikan
+		logWarn("Gagal parsing unicode otomatis dari activity log, menggunakan default node session.")
+	}
+
+	teleportNodeUser := fmt.Sprintf("server-%s", unicodeTarget)
+
+	// 2. Tawarkan log mana yang mau dibaca
+	var selectedLog string
+	logForm := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Pilih file log yang mau di-inspect:").
+				Options(
+					huh.NewOption("Parkee Agent Log (/var/log/agent/parkee-agent)", "/var/log/agent/parkee-agent"),
+					huh.NewOption("Application Backup Log (/var/tmp/application)", "/var/tmp/application"),
+				).
+				Value(&selectedLog),
+		),
+	).WithTheme(crushTheme())
+
+	if err := logForm.Run(); err != nil {
+		return
+	}
+
+	logInfo(fmt.Sprintf("Membuka sesi log via tsh ssh %s@%s ...", teleportNodeUser, teleportNodeUser))
+	fmt.Println(dimStyle.Render("  Menampilkan 100 baris terakhir log..."))
+	fmt.Println()
+
+	// Sesuai flow bener dari lu: tsh ssh server-0eu@server-0eu "tail -n 100 /path/to/log"
+	tailCmd := fmt.Sprintf("tail -n 100 %s", selectedLog)
+	cmd := exec.Command("tsh", "ssh", fmt.Sprintf("%s@%s", teleportNodeUser, teleportNodeUser), tailCmd)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+
+	if err := cmd.Run(); err != nil {
+		logErr("Gagal fetch log via Teleport. Pastikan lu udah 'tsh login' dulu ya men!")
 	}
 }
 
@@ -1652,32 +1675,19 @@ func queryGatesFromDB(tpUser *TeleportUser, loc *Location) ([]GateInfo, error) {
 	uni := strings.ToLower(loc.Unicode)
 	dbName := "agent_" + uni
 
-	sql := fmt.Sprintf(
-		"SELECT DISTINCT ON (user_pc) user_pc, ip_address FROM (SELECT user_pc, ip_address, created_at FROM core_user_activity WHERE lower(user_pc) LIKE '%%%%%s%%%%' AND deleted_at IS NULL AND action_type = 'LOGIN' AND created_at >= NOW() - INTERVAL '31 days') AS get_data ORDER BY user_pc, created_at DESC;",
-		uni,
-	)
+	likePattern := "%" + uni + "%"
+	sql := "SELECT DISTINCT ON (user_pc) user_pc, ip_address FROM (SELECT user_pc, ip_address, created_at FROM core_user_activity WHERE lower(user_pc) LIKE '" + likePattern + "' AND deleted_at IS NULL AND action_type = 'LOGIN' AND created_at >= NOW() - INTERVAL '31 days') AS get_data ORDER BY user_pc, created_at DESC;"
 	rawSQL := `psql -h localhost -U agent -d ` + dbName + ` -t -A -F'|' -c "` + sql + `"`
 
 	var out []byte
 	var err error
 
-	if tpUser.IsL2 {
-		nodeName := nodeNameFromUnicode(loc.Unicode)
-		cmd := exec.Command("tsh", "ssh",
-			fmt.Sprintf("%s@%s", nodeName, nodeName),
-			rawSQL,
-		)
-		out, err = cmd.Output()
-	} else {
-		cmd := exec.Command("sshpass", "-p", SshPass,
-			"ssh",
-			"-o", "StrictHostKeyChecking=no",
-			"-o", "ConnectTimeout=5",
-			fmt.Sprintf("support@%s", loc.IP),
-			rawSQL,
-		)
-		out, err = cmd.Output()
-	}
+	nodeName := nodeNameFromUnicode(loc.Unicode)
+	cmd := exec.Command("tsh", "ssh",
+		fmt.Sprintf("%s@%s", nodeName, nodeName),
+		rawSQL,
+	)
+	out, err = cmd.CombinedOutput()
 
 	if err != nil {
 		return nil, fmt.Errorf("Fetching data gate gagal nich: %w (output: %s)", err, string(out))

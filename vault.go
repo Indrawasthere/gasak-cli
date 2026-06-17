@@ -48,14 +48,19 @@ type VaultSecrets struct {
 	CmsDbName     string `json:"CMS_DB_NAME"`
 }
 
+// getVaultPath mempermudah handling absolute path di home directory
+func getVaultPath(fileName string) string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, VaultDir, fileName)
+}
+
 // initGasakKeys — Memastikan keypair RSA lokal tersedia tanpa merusak authorized_keys OS
 func initGasakKeys() error {
-	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, VaultDir)
+	dir := getVaultPath("")
 	_ = os.MkdirAll(dir, 0700)
 
-	privPath := filepath.Join(dir, PrivateKeyFile)
-	pubPath := filepath.Join(dir, PublicKeyFile)
+	privPath := getVaultPath(PrivateKeyFile)
+	pubPath := getVaultPath(PublicKeyFile)
 
 	// Jika keypair sudah ada, skip generation
 	if _, err := os.Stat(privPath); err == nil {
@@ -102,9 +107,8 @@ func initGasakKeys() error {
 }
 
 func loadVault() (*VaultSecrets, error) {
-	home, _ := os.UserHomeDir()
-	vaultPath := filepath.Join(home, VaultDir, VaultFile)
-	privPath := filepath.Join(home, VaultDir, PrivateKeyFile)
+	vaultPath := getVaultPath(VaultFile)
+	privPath := getVaultPath(PrivateKeyFile)
 
 	// Pastikan keypair siap pas runtime
 	if err := initGasakKeys(); err != nil {
@@ -112,7 +116,7 @@ func loadVault() (*VaultSecrets, error) {
 	}
 
 	if _, err := os.Stat(vaultPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("vault file tidak ditemukan")
+		return nil, fmt.Errorf("file vault lokal belum dibikin men (jalanin install.sh dulu biar sinkron)")
 	}
 
 	// 1. Baca Private Key Lokal
@@ -144,13 +148,11 @@ func loadVault() (*VaultSecrets, error) {
 	ciphertext, _ := hex.DecodeString(envelope.Payload)
 	nonce, _ := hex.DecodeString(envelope.Nonce)
 
-	// 3. Decrypt AES Key pake RSA-OAEP (Asymmetric)
 	aesKey, err := rsa.DecryptOAEP(sha256.New(), rand.Reader, privateKey, encryptedKey, nil)
 	if err != nil {
-		return nil, fmt.Errorf("decryption key gagal, pastikan vault terdaftar dengan benar: %w", err)
+		return nil, fmt.Errorf("decryption gagal. Keypair di lokal ga match sama yang didaftarin ke server pusat men: %w", err)
 	}
 
-	// 4. Decrypt Payload Secrets pake AES-256-GCM (Symmetric)
 	aesBlock, err := aes.NewCipher(aesKey)
 	if err != nil {
 		return nil, err
@@ -174,7 +176,6 @@ func loadVault() (*VaultSecrets, error) {
 }
 
 func applyVaultSecrets(s *VaultSecrets) {
-	// 1. Set ke OS Environment (buat dibaca script Python)
 	os.Setenv("GLPI_URL", s.GLPIUrl)
 	os.Setenv("OUTLINE_URL", s.OutlineURL)
 	os.Setenv("OUTLINE_API_KEY", s.OutlineAPIKey)
@@ -187,13 +188,11 @@ func applyVaultSecrets(s *VaultSecrets) {
 	os.Setenv("CMS_DB_PASS", s.CmsDbPass)
 	os.Setenv("CMS_DB_NAME", s.CmsDbName)
 
-	// 2. KUNCI UTAMA: Assign balik ke variabel global project Go lu men!
 	GLPIUrl = s.GLPIUrl
 	OutlineURL = s.OutlineURL
 	OutlineAPIKey = s.OutlineAPIKey
 	LinearAPIKey = s.LinearAPIKey
-	SshPass = s.SshPass // Pastikan variabel global SshPass atau SshPass internal lu terisi
-
+	SshPass = s.SshPass
 	CmsDbHost = s.CmsDbHost
 	CmsDbPort = s.CmsDbPort
 	CmsDbUser = s.CmsDbUser
