@@ -91,7 +91,7 @@ class GasakDistHandler(http.server.SimpleHTTPRequestHandler):
         'settlement_rfs.py',
         'version.txt',
         'server.properties',
-        'reinstall-vault.sh',
+        'reinstall-vault.sh'
     ]
 
     def do_GET(self):
@@ -207,7 +207,7 @@ class GasakDistHandler(http.server.SimpleHTTPRequestHandler):
     def get_client_hostname(self):
             return self.headers.get('X-Gasak-Host', 'unknown-device')
 
-        def log_request_detail(self, code, filename, status):
+    def log_request_detail(self, code, filename, status):
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             client_ip = self.client_address[0]
             hostname = self.get_client_hostname()
