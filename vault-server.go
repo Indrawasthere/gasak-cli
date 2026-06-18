@@ -215,12 +215,16 @@ func handleLocateGate(w http.ResponseWriter, r *http.Request) {
 }
 
 func queryGateViaTeleport(keyword string) ([]LocateResponse, error) {
-	nodeName := "server-" + keyword
-	dbName := "agent_" + keyword
+	// Pastikan keyword bersih dari spasi dan huruf besar
+	cleanKeyword := strings.TrimSpace(strings.ToLower(keyword))
+
+	nodeName := "server-" + cleanKeyword
+	dbName := "agent_" + cleanKeyword
 
 	query := `
 SELECT DISTINCT ON(user_pc)
-	user_pc || '@' || ip_address AS host_and_ip
+	user_pc,
+	ip_address
 FROM core_user_activity
 WHERE lower(user_pc) LIKE '%' || (SELECT lower(unique_code) FROM location) || '%'
   AND deleted_at IS NULL
@@ -233,7 +237,7 @@ ORDER BY user_pc, created_at DESC;
 	query = strings.ReplaceAll(query, "\t", " ")
 
 	cmdStr := fmt.Sprintf(
-		`psql -h localhost -d %s -U agent -At -c "%s"`,
+		`psql -h localhost -d %s -U agent -At -F '|' -c "%s"`,
 		dbName,
 		query,
 	)
@@ -259,7 +263,7 @@ ORDER BY user_pc, created_at DESC;
 			continue
 		}
 
-		parts := strings.Split(cleanedLine, "@")
+		parts := strings.Split(cleanedLine, "|")
 		if len(parts) != 2 {
 			continue
 		}

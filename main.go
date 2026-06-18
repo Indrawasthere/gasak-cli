@@ -1430,97 +1430,174 @@ func checkPythonTk() bool {
 }
 
 func runFetchLog() {
-	logInfo("Memulai proses fetch location gate...")
+	// ─── STEP 1: FETCH DATA LOKASI LIVE DARI SPREADSHEET (Mekanisme Pure Vault) ───
+	// Menggunakan SpreadsheetID dan SheetGID yang otomatis di-inject oleh loadVault()
+	if SpreadsheetID == "" || SheetGID == "" {
+		logErr("Spreadsheet ID atau GID kosong di Vault / .env men!")
+		return
+	}
 
-	var uniCode string
-	err := huh.NewInput().
-		Title("Masukkan Unicode Lokasi").
-		Description("Contoh: 1at (untuk Blok M Square)").
-		Value(&uniCode).
+	logInfo("Mengambil data standarisasi lokasi dari Google Sheet...")
+	urlTarget := fmt.Sprintf("https://docs.google.com/spreadsheets/d/%s/export?format=csv&gid=%s", SpreadsheetID, SheetGID)
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Get(urlTarget)
+	if err != nil {
+		logErr("Gagal koneksi download data lokasi: " + err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		logErr(fmt.Sprintf("Gagal fetch data lokasi sheet, HTTP status: %d", resp.StatusCode))
+		return
+	}
+
+	reader := csv.NewReader(resp.Body)
+	// Skip baris header pertama di spreadsheet
+	_, _ = reader.Read()
+
+	var allLocations []Location
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			continue
+		}
+		// Parsing kolom sesuai standarisasi: [0]=Unicode, [1]=Nama, [2]=IP
+		if len(record) >= 3 {
+			allLocations = append(allLocations, Location{
+				Unicode: strings.TrimSpace(strings.ToLower(record[0])),
+				Nama:    strings.TrimSpace(record[1]),
+				IP:      strings.TrimSpace(record[2]),
+			})
+		}
+	}
+
+	if len(allLocations) == 0 {
+		logErr("Data lokasi kosong atau format spreadsheet tidak sesuai men!")
+		return
+	}
+
+	// ─── STEP 2: INPUT SEARCH KEYWORD ───
+	var inputKeyword string
+	err = huh.NewInput().
+		Title("Location Lookup (Fetch Log)").
+		Description("Masukkan nama lokasi / unicode (Contoh: 1at, 0eu, blok m):").
+		Value(&inputKeyword).
 		Run()
 
 	if err != nil {
 		logWarn("Proses dibatalkan oleh user.")
 		return
 	}
-	uniCode = strings.TrimSpace(strings.ToLower(uniCode))
-	if uniCode == "" {
-		logErr("Unicode tidak boleh kosong men!")
+
+	inputKeyword = strings.TrimSpace(strings.ToLower(inputKeyword))
+	if inputKeyword == "" {
+		logErr("Keyword pencarian tidak boleh kosong men!")
 		return
 	}
 
-	// Tembak API vault-server pusat ke endpoint /api/locate-gate
-	urlTarget := fmt.Sprintf("http://10.70.0.110:9002/api/locate-gate?keyword=%s", uniCode)
+	// Saring lokasi yang cocok berdasarkan input user
+	var matchedLocations []Location
+	for _, loc := range allLocations {
+		if strings.Contains(strings.ToLower(loc.Nama), inputKeyword) ||
+			strings.Contains(strings.ToLower(loc.Unicode), inputKeyword) {
+			matchedLocations = append(matchedLocations, loc)
+		}
+	}
 
-	req, err := http.NewRequest("GET", urlTarget, nil)
-	if err != nil {
-		logErr("Gagal membuat request ke Vault Server: " + err.Error())
+	if len(matchedLocations) == 0 {
+		logErr("Lokasi kagak ketemu men! Coba cek keyword-nya lagi.")
 		return
 	}
 
-	// Kirim token distribusi gasak di header sesuai validasi vault-server
-	req.Header.Set("X-Gasak-Token", "gsk_dist_9f2k7x")
+	// Jika ada beberapa lokasi yang mirip, munculin picker interaktif
+	var selectedLoc Location
+	if len(matchedLocations) == 1 {
+		selectedLoc = matchedLocations[0]
+	} else {
+		var locOpts []huh.Option[Location]
+		for _, loc := range matchedLocations {
+			locOpts = append(locOpts, huh.NewOption(fmt.Sprintf("%s [%s] - %s", loc.Nama, strings.ToUpper(loc.Unicode), loc.IP), loc))
+		}
 
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		logErr("Yah gagal fetch location gate nya men: server tidak merespon (" + err.Error() + ")")
-		logWarn("Infoin Fadlan kalo fetching nya error yak!")
-		return
-	}
-	defer resp.Body.Close()
+		err = huh.NewSelect[Location]().
+			Title("Pilih Lokasi Teridentifikasi:").
+			Options(locOpts...).
+			Value(&selectedLoc).
+			Run()
 
-	if resp.StatusCode != http.StatusOK {
-		logErr(fmt.Sprintf("Yah gagal fetch location gate nya men: error server (%d)", resp.StatusCode))
-		logWarn("Infoin Fadlan kalo fetching nya error yak!")
-		return
-	}
-
-	var gates []LocateResponse
-	if err := json.NewDecoder(resp.Body).Decode(&gates); err != nil {
-		logErr("Gagal membaca standarisasi data dari Vault Server: " + err.Error())
-		return
+		if err != nil {
+			logWarn("Proses dibatalkan.")
+			return
+		}
 	}
 
-	if len(gates) == 0 {
-		logWarn("Tidak ada gate aktif terdeteksi untuk unicode tersebut dalam 30 hari terakhir.")
-		return
+	logOK(fmt.Sprintf("Target Terpilih: %s [%s] — %s", selectedLoc.Nama, strings.ToUpper(selectedLoc.Unicode), selectedLoc.IP))
+	fmt.Println()
+
+	// ─── STEP 3: ROLE DETECTION (L1 / L2 PENAMBAT SAFETY LAYER) ───
+	isUserL2 := false
+	currentUsername := "support"
+	if os.Getenv("GASAK_ROLE") == "admin" || os.Getenv("GASAK_ROLE") == "l2" || os.Getenv("PARKEE_SSH_USER") == "server" {
+		isUserL2 = true
+		currentUsername = "server"
 	}
 
-	var options []huh.Option[string]
-	for _, g := range gates {
-		options = append(options, huh.NewOption(
-			fmt.Sprintf("%s (%s)", g.NamaLokasi, g.IPAddress),
-			fmt.Sprintf("%s|%s", g.NamaLokasi, g.IPAddress),
-		))
+	tpUser := &TeleportUser{
+		Username: currentUsername,
+		IsL2:     isUserL2,
 	}
 
-	var selectedGate string
+	// ─── STEP 4: TAMPILAN MENU PILIH TIPE LOG ───
+	var logType string
 	err = huh.NewSelect[string]().
-		Title("Pilih Gate yang mau diambil log-nya:").
-		Options(options...).
-		Value(&selectedGate).
+		Title(fmt.Sprintf("Pilih tipe log dari %s yang mau diambil:", selectedLoc.Nama)).
+		Options(
+			huh.NewOption("Watersheep Log", "watersheep"),
+			huh.NewOption("Fisherman Log", "fisherman"),
+			huh.NewOption("Syslog / System Log", "syslog"),
+			huh.NewOption("PostgreSQL DB Log (L2 Only)", "postgres"),
+			huh.NewOption("Parkee Agent Log (/var/tmp/application)", "agent_tmp"),
+			huh.NewOption("Parkee Agent Log (/var/log/agent/parkee-agent)", "agent_var"),
+		).
+		Value(&logType).
 		Run()
 
 	if err != nil {
+		logWarn("Proses dibatalkan.")
 		return
 	}
 
-	gateParts := strings.Split(selectedGate, "|")
-	gateNama := gateParts[0]
-	gateIP := gateParts[1]
+	// ─── STEP 5: EKSEKUSI DOWNSTREAM & AUTOMATIC JUMPING CLEANUP ───
+	switch logType {
 
-	logInfo(fmt.Sprintf("Mengeksplorasi log pada %s menggunakan role support...", gateNama))
+	case "watersheep":
+		fetchLogFromDir(tpUser, &selectedLoc, "/var/log/watersheep", "Watersheep Log")
 
-	// Menggunakan environment variable SshPass (PARKEE_SSH_PASS) yang telah di-apply dari local vault
-	sshCmd := exec.Command("sshpass", "-p", SshPass, "ssh", "-o", "StrictHostKeyChecking=no", fmt.Sprintf("support@%s", gateIP))
+	case "fisherman":
+		fetchLogFromDir(tpUser, &selectedLoc, "/var/log/fisherman", "Fisherman Log")
 
-	sshCmd.Stdout = os.Stdout
-	sshCmd.Stderr = os.Stderr
-	sshCmd.Stdin = os.Stdin
+	case "syslog":
+		fetchSingleFile(tpUser, &selectedLoc, "/var/log/syslog", "System Log")
 
-	if err := sshCmd.Run(); err != nil {
-		logErr("Gagal masuk ke terminal gate: " + err.Error())
+	case "postgres":
+		if !tpUser.IsL2 {
+			logErr("Role L1 (support) gaboleh dan gabisa buat narik PostgreSQL log, men!")
+			return
+		}
+		fetchLogFromDir(tpUser, &selectedLoc, "/var/log/postgresql", "PostgreSQL Log")
+
+	case "agent_tmp":
+		logInfo("Memulai orchestrator pemanggilan cluster gate via internal bridge...")
+		fetchAgentGateLog(tpUser, &selectedLoc, "/var/tmp", "Agent Log (Application TMP)")
+
+	case "agent_var":
+		logInfo("Memulai orchestrator pemanggilan cluster gate via internal bridge...")
+		fetchAgentGateLog(tpUser, &selectedLoc, "/var/log/agent", "Agent Log (Parkee Agent VAR)")
 	}
 }
 
