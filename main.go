@@ -21,14 +21,14 @@ import (
 )
 
 const (
-	SpreadsheetID = "1A0ce374Dgw3pS4w05Yw9y1flJK5pZi6D-UUII6PG5VM"
-	SheetGID      = "463772829"
-
-	AppVersion = "1.1.17"
+	AppVersion = "1.1.18"
 )
 
 var (
 	CacheTTL = time.Hour
+
+	SpreadsheetID string
+	SheetGID      string
 
 	GLPIUrl       string
 	OutlineURL    string
@@ -85,12 +85,12 @@ func init() {
 	OutlineURL = os.Getenv("OUTLINE_URL")
 	OutlineAPIKey = os.Getenv("OUTLINE_API_KEY")
 	LinearAPIKey = os.Getenv("LINEAR_API_KEY")
+	SpreadsheetID = os.Getenv("GSHEET_DEPLOY_ID")
+	SheetGID = os.Getenv("GSHEET_DEPLOY_GID")
+	csvURL = fmt.Sprintf("https://docs.google.com/spreadsheets/d/%s/export?format=csv&gid=%s", SpreadsheetID, SheetGID)
 
 	// Fallback password ssh support default PARKEE
 	SshPass = os.Getenv("PARKEE_SSH_PASS")
-	if SshPass == "" {
-		SshPass = "REMOVED_PASSWORD"
-	}
 
 	// Credential Database CMS Pusat untuk parsing di internal GASAK / script python
 	CmsDbHost = os.Getenv("CMS_DB_HOST")
@@ -107,7 +107,7 @@ const UpdateURL = "http://10.70.0.110:9001/version.txt"
 const BinaryURL = "http://10.70.0.110:9001/gasak"
 
 var (
-	csvURL       = fmt.Sprintf("https://docs.google.com/spreadsheets/d/%s/export?format=csv&gid=%s", SpreadsheetID, SheetGID)
+	csvURL       string
 	cacheFile    = filepath.Join(os.Getenv("HOME"), ".cache", "parkee", "master_loc.csv")
 	deployScript = filepath.Join(os.Getenv("HOME"), "gasak-dist", "deploy_parkee.py")
 )
@@ -2025,4 +2025,6 @@ func applyVaultSecrets(s *VaultSecrets) {
 	os.Setenv("CMS_DB_USER", s.CmsDbUser)
 	os.Setenv("CMS_DB_PASS", s.CmsDbPass)
 	os.Setenv("CMS_DB_NAME", s.CmsDbName)
+	os.Setenv("GSHEET_DEPLOY_ID", s.GsheetDeployId)
+	os.Setenv("GSHEET_DEPLOY_GID", s.GsheetDeployGid)
 }
