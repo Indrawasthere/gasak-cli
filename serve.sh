@@ -17,6 +17,7 @@ chmod 755 serve.sh       2>/dev/null || true
 chmod 644 ./*.py         2>/dev/null || true
 chmod 644 version.txt    2>/dev/null || true
 chmod 644 server.properties 2>/dev/null || true
+chmod 755 reinstall-vault.sh 2>/dev/null || true
 # .env di server TIDAK di-serve ke client (keamanan)
 
 echo "═══════════════════════════════════════════════════════════"
@@ -37,6 +38,7 @@ ALL_FILES=(
     "settlement_rfs.py"
     "version.txt"
     "server.properties"
+    "reinstall-vault.sh"
 )
 
 ALL_OK=true
@@ -205,31 +207,30 @@ class GasakDistHandler(http.server.SimpleHTTPRequestHandler):
         return 'application/octet-stream'
 
     def get_client_hostname(self):
-            return self.headers.get('X-Gasak-Host', 'unknown-device')
+        return self.headers.get('X-Gasak-Host', 'unknown-device')
 
     def log_request_detail(self, code, filename, status):
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            client_ip = self.client_address[0]
-            hostname = self.get_client_hostname()
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        client_ip = self.client_address[0]
+        hostname = self.get_client_hostname()
+        if code == 200:
+            code_color = f"\033[32m{code}\033[0m"
+        elif code in (403, 404):
+            code_color = f"\033[33m{code}\033[0m"
+        elif code >= 500 or code == 0:
+            code_color = f"\033[31m{code}\033[0m"
+        else:
+            code_color = str(code)
 
-            if code == 200:
-                code_color = f"\033[32m{code}\033[0m"
-            elif code in (403, 404):
-                code_color = f"\033[33m{code}\033[0m"
-            elif code >= 500 or code == 0:
-                code_color = f"\033[31m{code}\033[0m"
-            else:
-                code_color = str(code)
+        msg_plain = f"[{timestamp}] {client_ip:15s} | {hostname:20s} | {code} | {filename:35s} | {status}"
+        msg_color = f"[{timestamp}] {client_ip:15s} | {hostname:20s} | {code_color} | {filename:35s} | {status}"
 
-            msg_plain = f"[{timestamp}] {client_ip:15s} | {hostname:20s} | {code} | {filename:35s} | {status}"
-            msg_color = f"[{timestamp}] {client_ip:15s} | {hostname:20s} | {code_color} | {filename:35s} | {status}"
-
-            print(msg_color, flush=True)
-            try:
-                with open(LOG_FILE, 'a') as lf:
-                    lf.write(msg_plain + '\n')
-            except Exception:
-                pass
+        print(msg_color, flush=True)
+        try:
+            with open(LOG_FILE, 'a') as lf:
+                lf.write(msg_plain + '\n')
+        except Exception:
+            pass
 
     def log_message(self, format, *args):
         # Override default log supaya ga noise di stdout
