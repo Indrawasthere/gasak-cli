@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	AppVersion = "1.1.18"
+	AppVersion = "1.1.20"
 )
 
 var (
