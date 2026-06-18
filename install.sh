@@ -130,22 +130,22 @@ done
 if [ ! -f "$ENV_PATH" ]; then
     echo -e "  ${DIM}Initializing default configuration space...${RESET}"
     cat << 'EOF' > "$ENV_PATH"
-    # GASAK FALLBACK ENVIRONMENT CONFIGURATION
-    # Generated automatically by system setup
-    GLPI_URL=""
-    OUTLINE_URL=""
-    OUTLINE_API_KEY=""
-    LINEAR_API_KEY=""
-    PARKEE_SSH_USER=""
-    PARKEE_SSH_PASS=""
-    CMS_DB_HOST=""
-    CMS_DB_PORT="5432"
-    CMS_DB_USER=""
-    CMS_DB_PASS=""
-    CMS_DB_NAME=""
-    GSHEET_DEPLOY_ID=""
-    GSHEET_DEPLOY_GID=""
-    EOF
+# GASAK FALLBACK ENVIRONMENT CONFIGURATION
+# Generated automatically by system setup
+GLPI_URL=""
+OUTLINE_URL=""
+OUTLINE_API_KEY=""
+LINEAR_API_KEY=""
+PARKEE_SSH_USER=""
+PARKEE_SSH_PASS=""
+CMS_DB_HOST=""
+CMS_DB_PORT="5432"
+CMS_DB_USER=""
+CMS_DB_PASS=""
+CMS_DB_NAME=""
+GSHEET_DEPLOY_ID=""
+GSHEET_DEPLOY_GID=""
+EOF
     echo -e "  ${GREEN}✔${RESET}  Template .env created at ${ENV_PATH}"
 fi
 
