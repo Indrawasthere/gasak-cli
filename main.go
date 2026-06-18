@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -18,10 +20,11 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 )
 
 const (
-	AppVersion = "1.1.231"
+	AppVersion = "1.1.224"
 )
 
 var (
@@ -90,8 +93,16 @@ func init() {
 	OutlineURL = os.Getenv("OUTLINE_URL")
 	OutlineAPIKey = os.Getenv("OUTLINE_API_KEY")
 	LinearAPIKey = os.Getenv("LINEAR_API_KEY")
+
+	// Support both naming conventions (GSHEET_DEPLOY_ID or SPREADSHEET_ID)
 	SpreadsheetID = os.Getenv("GSHEET_DEPLOY_ID")
+	if SpreadsheetID == "" {
+		SpreadsheetID = os.Getenv("SPREADSHEET_ID")
+	}
 	SheetGID = os.Getenv("GSHEET_DEPLOY_GID")
+	if SheetGID == "" {
+		SheetGID = os.Getenv("SHEET_GID")
+	}
 	csvURL = fmt.Sprintf("https://docs.google.com/spreadsheets/d/%s/export?format=csv&gid=%s", SpreadsheetID, SheetGID)
 
 	// Fallback password ssh support default PARKEE
@@ -644,6 +655,26 @@ func runParkeeLauncher() {
 		return
 	}
 
+	// Validate credentials before calling script (consistent with settlement_rfs pattern)
+	if os.Getenv("PARKEE_SSH_USER") == "" || os.Getenv("PARKEE_SSH_PASS") == "" {
+		logErr("SSH credentials belum di-set di .env atau vault!")
+		logInfo("Tambahkan ke ~/.env atau ~/gasak-dist/.env:")
+		fmt.Println(dimStyle.Render("  PARKEE_SSH_USER=support  # gunakan 'support' untuk L1 atau 'server' untuk L2"))
+		fmt.Println(dimStyle.Render("  PARKEE_SSH_PASS=<password>"))
+		return
+	}
+
+	if SpreadsheetID == "" || SheetGID == "" {
+		logErr("Google Sheet credentials belum di-set di .env!")
+		logInfo("Tambahkan ke ~/.env atau ~/gasak-dist/.env:")
+		fmt.Println(dimStyle.Render("  GSHEET_DEPLOY_ID=<spreadsheet_id>"))
+		fmt.Println(dimStyle.Render("  GSHEET_DEPLOY_GID=<sheet_gid>"))
+		logInfo("atau gunakan naming lama:")
+		fmt.Println(dimStyle.Render("  SPREADSHEET_ID=<spreadsheet_id>"))
+		fmt.Println(dimStyle.Render("  SHEET_GID=<sheet_gid>"))
+		return
+	}
+
 	logInfo("Gasak Tembak Agent")
 	fmt.Println()
 
@@ -651,6 +682,14 @@ func runParkeeLauncher() {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
+
+	cmd.Env = append(os.Environ(),
+		"PARKEE_SSH_USER="+os.Getenv("PARKEE_SSH_USER"),
+		"PARKEE_SSH_PASS="+os.Getenv("PARKEE_SSH_PASS"),
+		"GSHEET_DEPLOY_ID="+SpreadsheetID,
+		"GSHEET_DEPLOY_GID="+SheetGID,
+	)
+
 	if err := cmd.Run(); err != nil {
 		logWarn("Tembak script exited: " + err.Error())
 	}
@@ -1522,10 +1561,8 @@ func runFetchLog() {
 	// ─── STEP 5: EKSEKUSI UTILITY SINKRON BERDASARKAN METADATA STRUCT ───
 	if chosenLog.IsAgentLog {
 		logInfo("Memulai orchestrator pemanggilan cluster gate via internal bridge...")
-		// Kirim ke handler agent gate log bawaan lo (jumping via DB gate)
 		fetchAgentGateLog(tpUser, selectedLoc, chosenLog.Path, chosenLog.Name)
 	} else {
-		// Ambil log dari server main lokasi langsung
 		if chosenLog.IsDir {
 			fetchLogFromDir(tpUser, selectedLoc, chosenLog.Path, chosenLog.Name)
 		} else {
@@ -1593,14 +1630,12 @@ func listRemoteDir(tpUser *TeleportUser, loc *Location, remoteDir string) ([]str
 
 	if tpUser.IsL2 {
 		nodeName := nodeNameFromUnicode(loc.Unicode)
-
 		remoteUserHost := fmt.Sprintf("%s@%s", nodeName, nodeName)
 		remoteCommand := fmt.Sprintf("bash -c '%s'", lsCmd)
 
 		cmd := exec.Command("tsh", "ssh", remoteUserHost, remoteCommand)
 		out, err = cmd.Output()
 	} else {
-
 		cmd := exec.Command("sshpass", "-p", SshPass,
 			"ssh",
 			"-o", "StrictHostKeyChecking=no",
@@ -1633,7 +1668,6 @@ func listRemoteDir(tpUser *TeleportUser, loc *Location, remoteDir string) ([]str
 }
 
 func scpFile(tpUser *TeleportUser, loc *Location, remotePath string, filename string) {
-	// Bikin local folder: ~/Downloads/logs/<UNICODE>
 	destDir := filepath.Join(os.Getenv("HOME"), "Downloads", "logs", strings.ToUpper(loc.Unicode))
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		logErr("Gagal membuat folder tujuan lokal: " + err.Error())
@@ -1675,22 +1709,87 @@ func scpFile(tpUser *TeleportUser, loc *Location, remotePath string, filename st
 	logOK(fmt.Sprintf("Mantap men! Log berhasil disimpen di: %s", destPath))
 }
 
-// ─── Gate PC Log Flow ─────────────────────────────────────────────────────────
-// Log agent ada di masing-masing gate PC (pm/pk), bukan di server main.
-// Flow: GASAK → SSH server main → query postgres → pilih gate →
-//       server main SCP dari gate ke /tmp/ → GASAK SCP dari server main ke laptop
-
 type GateInfo struct {
 	UserPC string
 	IP     string
 }
 
 func queryGatesFromDB(tpUser *TeleportUser, loc *Location) ([]GateInfo, error) {
-	if tpUser.Username != "server" {
-		return nil, fmt.Errorf("fitur locate gate hanya tersedia untuk L2")
+	// For L2: Try Teleport query first (local DB on server)
+	if tpUser.IsL2 {
+		gates, err := queryGatesViaTeleport(tpUser, loc)
+		if err == nil {
+			return gates, nil
+		}
+		logWarn("Teleport query gagal, coba direct DB connection...")
 	}
 
-	return queryGatesViaTeleport(tpUser, loc)
+	// For L1 or L2 fallback: Use direct DB query (same pattern as settlement_rfs)
+	// L1 sudah punya credentials via CMS_DB_* env vars
+	return queryGatesDirectDB(loc)
+}
+
+func queryGatesDirectDB(loc *Location) ([]GateInfo, error) {
+	if CmsDbHost == "" || CmsDbUser == "" || CmsDbPass == "" || CmsDbName == "" {
+		return nil, fmt.Errorf("CMS DB credentials belum di-set. Pastiin .env atau vault sudah dikonfigurasi")
+	}
+
+	connString := fmt.Sprintf(
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		CmsDbHost, CmsDbPort, CmsDbUser, CmsDbPass, CmsDbName,
+	)
+
+	db, err := sql.Open("postgres", connString)
+	if err != nil {
+		return nil, fmt.Errorf("DB connection gagal: %w", err)
+	}
+	defer db.Close()
+
+	// Test connection
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		return nil, fmt.Errorf("DB unreachable (%s): %w", CmsDbHost, err)
+	}
+
+	// Query gate list dari core_user_activity (sama seperti queryGatesViaTeleport)
+	query := `
+SELECT DISTINCT ON(user_pc)
+    user_pc,
+    ip_address
+FROM core_user_activity
+WHERE lower(user_pc) LIKE '%' || (SELECT lower(unique_code) FROM location) || '%'
+  AND deleted_at IS NULL
+  AND action_type = 'LOGIN'
+  AND created_at >= NOW() - INTERVAL '30 days'
+ORDER BY user_pc, created_at DESC;
+`
+
+	rows, err := db.QueryContext(context.Background(), query)
+	if err != nil {
+		return nil, fmt.Errorf("query gate gagal: %w", err)
+	}
+	defer rows.Close()
+
+	var gates []GateInfo
+	for rows.Next() {
+		var g GateInfo
+		if err := rows.Scan(&g.UserPC, &g.IP); err != nil {
+			logWarn(fmt.Sprintf("Gagal scan row: %v", err))
+			continue
+		}
+		gates = append(gates, g)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration gagal: %w", err)
+	}
+
+	if len(gates) == 0 {
+		return nil, fmt.Errorf("tidak ada gate ditemukan untuk lokasi %s", loc.Unicode)
+	}
+
+	return gates, nil
 }
 
 func queryGatesViaTeleport(tpUser *TeleportUser, loc *Location) ([]GateInfo, error) {
@@ -1699,8 +1798,8 @@ func queryGatesViaTeleport(tpUser *TeleportUser, loc *Location) ([]GateInfo, err
 
 	query := `
 SELECT DISTINCT ON(user_pc)
-	user_pc,
-	ip_address
+    user_pc,
+    ip_address
 FROM core_user_activity
 WHERE lower(user_pc) LIKE '%' || (SELECT lower(unique_code) FROM location) || '%'
 AND deleted_at IS NULL
@@ -1746,70 +1845,9 @@ ORDER BY user_pc, created_at DESC;
 	return gates, nil
 }
 
-func queryGatesViaPSQL(loc *Location) ([]GateInfo, error) {
-	nodeName := "server-" + strings.ToLower(loc.Unicode)
-	dbName := "agent_" + strings.ToLower(loc.Unicode)
-
-	query := `
-SELECT DISTINCT ON(user_pc)
-	user_pc || '@' || ip_address AS host_and_ip
-FROM core_user_activity
-WHERE lower(user_pc) LIKE '%' || (SELECT lower(unique_code) FROM location) || '%'
-AND deleted_at IS NULL
-AND action_type = 'LOGIN'
-AND created_at >= NOW() - INTERVAL '30 days'
-ORDER BY user_pc, created_at DESC;
-`
-
-	query = strings.ReplaceAll(query, "\n", " ")
-
-	cmdStr := fmt.Sprintf(
-		`psql -h localhost -d %s -U agent -At -c "%s"`,
-		dbName,
-		query,
-	)
-
-	sshUser := getEnvDefault("PARKEE_SSH_USER", "server")
-
-	cmd := exec.Command(
-		"tsh",
-		"ssh",
-		fmt.Sprintf("%s@%s", sshUser, nodeName),
-		cmdStr,
-	)
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("psql gagal: %v | %s", err, string(output))
-	}
-
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	var gates []GateInfo
-
-	for _, line := range lines {
-		if !strings.Contains(line, "@") {
-			continue
-		}
-
-		parts := strings.SplitN(line, "@", 2)
-		if len(parts) != 2 {
-			continue
-		}
-
-		gates = append(gates, GateInfo{
-			UserPC: parts[0],
-			IP:     parts[1],
-		})
-	}
-
-	return gates, nil
-}
-
-// listGateLogFiles SSH dari server main ke gate PC, list file di remotePath
 func listGateLogFiles(tpUser *TeleportUser, loc *Location, gate GateInfo, remotePath string) ([]string, error) {
 	gatePass := fmt.Sprintf("pc%sclient", strings.ToLower(loc.Unicode))
 
-	// Command buat jalan di SERVER Main untuk list file di PC gate
 	lsCmd := fmt.Sprintf(
 		"sshpass -p '%s' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 %s@%s 'ls -1t %s 2>/dev/null | head -30'",
 		gatePass, gate.UserPC, gate.IP, remotePath,
@@ -1855,9 +1893,7 @@ func listGateLogFiles(tpUser *TeleportUser, loc *Location, gate GateInfo, remote
 	return files, nil
 }
 
-// fetchAgentGateLog main buat orchestrator si pengambil log dari gate PC
 func fetchAgentGateLog(tpUser *TeleportUser, loc *Location, remotePath string, logLabel string) {
-	// Step 1: Query list gate dari postgres di server main
 	logInfo(fmt.Sprintf("List Gate di %s [%s]...", loc.Nama, loc.Unicode))
 	fmt.Println()
 
@@ -1871,7 +1907,6 @@ func fetchAgentGateLog(tpUser *TeleportUser, loc *Location, remotePath string, l
 	logOK(fmt.Sprintf("%d gate ada nich.", len(gates)))
 	fmt.Println()
 
-	// Step 2: Pilih gate dari dropdown
 	var gateOpts []huh.Option[string]
 	for _, g := range gates {
 		label := fmt.Sprintf("%-25s | %s", g.UserPC, g.IP)
@@ -1895,7 +1930,6 @@ func fetchAgentGateLog(tpUser *TeleportUser, loc *Location, remotePath string, l
 		return
 	}
 
-	// Cari GateInfo yang dipilih
 	var selectedGate GateInfo
 	for _, g := range gates {
 		if g.UserPC == selectedGateUser {
@@ -1906,7 +1940,6 @@ func fetchAgentGateLog(tpUser *TeleportUser, loc *Location, remotePath string, l
 
 	fmt.Println()
 
-	// Step 3: List file log di gate yang dipilih
 	logInfo(fmt.Sprintf("Listing %s di gate %s [%s]...", logLabel, selectedGate.UserPC, selectedGate.IP))
 
 	files, err := listGateLogFiles(tpUser, loc, selectedGate, remotePath)
@@ -1940,14 +1973,9 @@ func fetchAgentGateLog(tpUser *TeleportUser, loc *Location, remotePath string, l
 
 	fmt.Println()
 
-	// Step 4: 2-hop/jumping SCP — gate → /tmp/ server main → laptop
 	scpGateFileViaServerPos(tpUser, loc, selectedGate, remotePath+"/"+selectedFile, selectedFile)
 }
 
-// scpGateFileViaServerMain gasak 2-hop/jumping transfer:
-// 1. Server main SCP dari gate PC ke /tmp/<filename> di server main
-// 2. GASAK SCP dari /tmp/<filename> server main ke laptop
-// Cleanup /tmp/<filename> di server main setelah selesai tercopy ke device si requester
 func scpGateFileViaServerPos(tpUser *TeleportUser, loc *Location, gate GateInfo, remoteFilePath string, filename string) {
 	gatePass := fmt.Sprintf("pc%sclient", strings.ToLower(loc.Unicode))
 	tmpPath := fmt.Sprintf("/tmp/%s", filename)
@@ -1963,7 +1991,6 @@ func scpGateFileViaServerPos(tpUser *TeleportUser, loc *Location, gate GateInfo,
 	fmt.Println(dimStyle.Render("  Ini mungkin butuh waktu ya men, tergantung ukuran file..."))
 	fmt.Println()
 
-	// Command buat running di SERVER MAIN: SCP dari gate ke /tmp/
 	hop1Cmd := fmt.Sprintf(
 		"sshpass -p '%s' scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 %s@%s:%s %s",
 		gatePass, gate.UserPC, gate.IP, remoteFilePath, tmpPath,
@@ -2004,7 +2031,6 @@ func scpGateFileViaServerPos(tpUser *TeleportUser, loc *Location, gate GateInfo,
 	logInfo("Jumping 2/2 — Narik dari server main ke laptop...")
 	fmt.Println()
 
-	// Hop/Jumping 2: GASAK SCP dari /tmp/ server main ke laptop
 	var hop2Cmd *exec.Cmd
 
 	if tpUser.IsL2 {

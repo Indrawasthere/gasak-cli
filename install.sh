@@ -77,6 +77,17 @@ for cmd in curl python3 pip3 openssl; do
     fi
 done
 
+# System libraries required for Python packages (psycopg2-binary compilation)
+echo -e "  ${DIM}Checking system libraries...${RESET}"
+for lib in build-essential libpq-dev; do
+    if dpkg -l 2>/dev/null | grep -q "^ii  $lib"; then
+        echo -e "  ${GREEN}✔${RESET}  Library '${lib}' ready"
+    else
+        echo -e "  ${YELLOW}!${RESET}  Library '${lib}' not found, installing..."
+        sudo apt update && sudo apt install -y "$lib"
+    fi
+done
+
 # ─── PIP PACKAGES REQUIREMENT ──────────────────────────────────
 echo -e "\n${BOLD}[2/4] Syncing Python Dependencies${RESET}"
 echo -e "  ${DIM}Installing mandatory packages via pip...${RESET}"
@@ -86,7 +97,7 @@ if ! pip3 install $PIP_FLAGS --upgrade pip &>/dev/null; then
     PIP_FLAGS=""
 fi
 
-PYTHON_PKGS=(requests python-dotenv rich questionary hvac paramiko)
+PYTHON_PKGS=(requests python-dotenv rich questionary hvac paramiko psycopg2-binary iterfzf)
 for pkg in "${PYTHON_PKGS[@]}"; do
     if python3 -c "import $pkg" &>/dev/null; then
         echo -e "  ${GREEN}✔${RESET}  Python module '${pkg}' already installed"
@@ -132,19 +143,31 @@ if [ ! -f "$ENV_PATH" ]; then
     cat << 'EOF' > "$ENV_PATH"
 # GASAK FALLBACK ENVIRONMENT CONFIGURATION
 # Generated automatically by system setup
+# Note: Vault takes priority. Set these for fallback or development.
+
+# URLs
 GLPI_URL=""
 OUTLINE_URL=""
+
+# APIs
 OUTLINE_API_KEY=""
 LINEAR_API_KEY=""
-PARKEE_SSH_USER=""
+
+# SSH Credentials (for deployment & log access)
+PARKEE_SSH_USER="support"
 PARKEE_SSH_PASS=""
+
+# Google Sheets (for location data)
+# Use either GSHEET_DEPLOY_ID or SPREADSHEET_ID (main.go supports both)
+GSHEET_DEPLOY_ID=""
+GSHEET_DEPLOY_GID=""
+
+# CMS Database (for settlement & log queries)
 CMS_DB_HOST=""
 CMS_DB_PORT="5432"
 CMS_DB_USER=""
 CMS_DB_PASS=""
 CMS_DB_NAME=""
-GSHEET_DEPLOY_ID=""
-GSHEET_DEPLOY_GID=""
 EOF
     echo -e "  ${GREEN}✔${RESET}  Template .env created at ${ENV_PATH}"
 fi

@@ -17,8 +17,6 @@ import (
 	"os/exec"
 	"strings"
 	"time"
-
-	_ "github.com/lib/pq"
 )
 
 const (
@@ -78,11 +76,7 @@ func handleGetEnv(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Token     string `json:"token"`
-		PublicKey string `json:"public_key"`
-	}
-
+	var req ClientRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
@@ -94,9 +88,12 @@ func handleGetEnv(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Sanitize string public key kiriman client
 	pubKeyStr := req.PublicKey
 	pubKeyStr = strings.ReplaceAll(pubKeyStr, `\n`, "\n")
 	pubKeyStr = strings.TrimSpace(pubKeyStr)
+
+	// Jika client cuma ngirim raw string base64 tanpa header PEM
 	if !strings.Contains(pubKeyStr, "BEGIN PUBLIC KEY") {
 		pubKeyStr = fmt.Sprintf("-----BEGIN PUBLIC KEY-----\n%s\n-----END PUBLIC KEY-----", pubKeyStr)
 	}
@@ -126,6 +123,7 @@ func handleGetEnv(w http.ResponseWriter, r *http.Request) {
 	outbound, err := encryptHybrid(plaintext, pubKeyStr)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"error":"` + err.Error() + `"}`))
 		return
 	}
@@ -135,17 +133,18 @@ func handleGetEnv(w http.ResponseWriter, r *http.Request) {
 }
 
 func encryptHybrid(plaintext []byte, pubKeyPEM string) (*OutboundVault, error) {
+	// Menjamin format string multiline PEM bersih total
 	pubKeyPEM = strings.ReplaceAll(pubKeyPEM, `\n`, "\n")
 	pubKeyPEM = strings.TrimSpace(pubKeyPEM)
 
 	block, _ := pem.Decode([]byte(pubKeyPEM))
 	if block == nil {
-		return nil, fmt.Errorf("failed to decode public key PEM")
+		return nil, fmt.Errorf("failed to decode public key PEM (block empty)")
 	}
 
 	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse public key: %w", err)
+		return nil, fmt.Errorf("failed to parse public key bytes: %w", err)
 	}
 
 	rsaPubKey, ok := pub.(*rsa.PublicKey)
@@ -153,6 +152,7 @@ func encryptHybrid(plaintext []byte, pubKeyPEM string) (*OutboundVault, error) {
 		return nil, fmt.Errorf("bukan RSA Public Key")
 	}
 
+	// 1. Generate AES 256 Key
 	aesKey := make([]byte, 32)
 	if _, err := rand.Read(aesKey); err != nil {
 		return nil, err
@@ -166,15 +166,20 @@ func encryptHybrid(plaintext []byte, pubKeyPEM string) (*OutboundVault, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// 2. Generate Nonce
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err = rand.Read(nonce); err != nil {
 		return nil, err
 	}
+
+	// 3. Encrypt Payload menggunakan AES-GCM
 	ciphertext := gcm.Seal(nil, nonce, plaintext, nil)
 
+	// 4. Encrypt AES Key menggunakan RSA-OAEP Public Key Client
 	encryptedKey, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, rsaPubKey, aesKey, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to envelope key: %w", err)
+		return nil, fmt.Errorf("failed to envelope key via RSA-OAEP: %w", err)
 	}
 
 	return &OutboundVault{
@@ -215,7 +220,6 @@ func handleLocateGate(w http.ResponseWriter, r *http.Request) {
 }
 
 func queryGateViaTeleport(keyword string) ([]LocateResponse, error) {
-	// Pastikan keyword bersih dari spasi dan huruf besar
 	cleanKeyword := strings.TrimSpace(strings.ToLower(keyword))
 
 	nodeName := "server-" + cleanKeyword
@@ -223,8 +227,8 @@ func queryGateViaTeleport(keyword string) ([]LocateResponse, error) {
 
 	query := `
 SELECT DISTINCT ON(user_pc)
-	user_pc,
-	ip_address
+    user_pc,
+    ip_address
 FROM core_user_activity
 WHERE lower(user_pc) LIKE '%' || (SELECT lower(unique_code) FROM location) || '%'
   AND deleted_at IS NULL
@@ -294,11 +298,4 @@ func logAccess(r *http.Request, status int, msg string) {
 		defer f.Close()
 		_, _ = f.WriteString(logStr)
 	}
-}
-
-func getEnvDefault(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
 }
