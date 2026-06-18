@@ -33,6 +33,8 @@ echo -e "  ${GREEN}✔${RESET}  Keypair generated"
 PURE_KEY=$(grep -v -- "-----" "$PUB_KEY_FILE" | tr -d '\n' | tr -d '\r' | tr -d ' ')
 JSON_PAYLOAD=$(printf '{"token":"%s","public_key":"%s"}' "$GASAK_DIST_TOKEN" "$PURE_KEY")
 
+DEVICE_HOST=$(hostname 2>/dev/null || echo "unknown-device")
+
 HTTP_STATUS=$(curl -s -o "$VAULT_FILE" -w "%{http_code}" \
     -X POST \
     -H "Content-Type: application/json" \
