@@ -36,17 +36,27 @@ from rich.text import Text
 # CONFIG
 # ─────────────────────────────────────────────────────────────
 
-SPREADSHEET_ID = "1A0ce374Dgw3pS4w05Yw9y1flJK5pZi6D-UUII6PG5VM"
-SHEET_GID = "463772829"
+SPREADSHEET_ID = os.environ.get("GSHEET_DEPLOY_ID", "")
+SHEET_GID = os.environ.get("GSHEET_DEPLOY_GID", "")
 CSV_URL = (
     f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export"
     f"?format=csv&gid={SHEET_GID}"
 )
 
-SSH_USER = os.environ.get("PARKEE_SSH_USER", "support")
-SSH_PASS = os.environ.get("PARKEE_SSH_PASS", "REMOVED_PASSWORD")
-SSH_TIMEOUT = 10
-ACTUATOR_TIMEOUT = 5
+SSH_USER = os.environ.get("PARKEE_SSH_USER")
+SSH_PASS = os.environ.get("PARKEE_SSH_PASS")
+SSH_TIMEOUT = 15
+ACTUATOR_TIMEOUT = 10
+
+if not SSH_USER or not SSH_PASS:
+    print("\n[!] Error: Credentials nya gaada men kalo lu jalanin langsung hehe")
+    print("[!] Pake GASAK yak awkawkawk\n")
+    sys.exit(1)
+
+if not SPREADSHEET_ID or not SHEET_GID:
+    print("\n[!] Error: Sama men, Credentials nya gaada kalo lu jalanin langsung")
+    print("[!] Pake GASAK buat jalanin script ini yak\n")
+    sys.exit(1)
 
 APP_DIR = "/opt/app/agent/parkee-agent"
 SERVER_PROPS = f"{APP_DIR}/server.properties"
@@ -64,7 +74,7 @@ FILES_TO_SYNC = [
 
 CACHE_DIR = Path.home() / ".cache" / "parkee"
 CACHE_FILE = CACHE_DIR / "master_loc.csv"
-CACHE_TTL = 3600  # 1 jam
+CACHE_TTL = 3600
 
 LOG_DIR = Path.home() / "logs" / "parkee"
 
@@ -250,7 +260,7 @@ def load_sheet(force_refresh: bool = False) -> list[dict]:
 
     with console.status("[cyan]Fetching Google Sheet...[/]", spinner="dots"):
         try:
-            r = requests.get(CSV_URL, timeout=15)
+            r = requests.get(CSV_URL, timeout=30)
             r.raise_for_status()
             CACHE_FILE.write_text(r.text, encoding="utf-8")
             ok("Location data updated")

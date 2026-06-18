@@ -103,6 +103,8 @@ done
 # ─── DOWNLOAD BINARY & ENGINES ─────────────────────────────────
 echo -e "\n${BOLD}[3/4] Pulling Toolchain Components from Dist Server${RESET}"
 
+DEVICE_HOST=$(hostname 2>/dev/null || echo "unknown-device")
+
 COMPONENTS=(
     "gasak"
     "decode_and_merge.py"
@@ -113,7 +115,9 @@ COMPONENTS=(
 
 for file in "${COMPONENTS[@]}"; do
     echo -ne "  .. Fetching ${file} "
-    if curl -fsSL "${BASE_URL}/${file}" -o "${INSTALL_DIR}/${file}"; then
+    if curl -fsSL \
+        -H "X-Gasak-Host: ${DEVICE_HOST}" \
+        "${BASE_URL}/${file}" -o "${INSTALL_DIR}/${file}"; then
         echo -e "\r  ${GREEN}✔${RESET}  Downloaded: ${file}"
         if [[ "$file" == "gasak" ]]; then
             chmod +x "${INSTALL_DIR}/${file}"
@@ -126,20 +130,22 @@ done
 if [ ! -f "$ENV_PATH" ]; then
     echo -e "  ${DIM}Initializing default configuration space...${RESET}"
     cat << 'EOF' > "$ENV_PATH"
-# GASAK FALLBACK ENVIRONMENT CONFIGURATION
-# Generated automatically by system setup
-GLPI_URL=""
-OUTLINE_URL=""
-OUTLINE_API_KEY=""
-LINEAR_API_KEY=""
-PARKEE_SSH_USER=""
-PARKEE_SSH_PASS=""
-CMS_DB_HOST=""
-CMS_DB_PORT="5432"
-CMS_DB_USER=""
-CMS_DB_PASS=""
-CMS_DB_NAME=""
-EOF
+    # GASAK FALLBACK ENVIRONMENT CONFIGURATION
+    # Generated automatically by system setup
+    GLPI_URL=""
+    OUTLINE_URL=""
+    OUTLINE_API_KEY=""
+    LINEAR_API_KEY=""
+    PARKEE_SSH_USER=""
+    PARKEE_SSH_PASS=""
+    CMS_DB_HOST=""
+    CMS_DB_PORT="5432"
+    CMS_DB_USER=""
+    CMS_DB_PASS=""
+    CMS_DB_NAME=""
+    GSHEET_DEPLOY_ID=""
+    GSHEET_DEPLOY_GID=""
+    EOF
     echo -e "  ${GREEN}✔${RESET}  Template .env created at ${ENV_PATH}"
 fi
 
@@ -172,10 +178,11 @@ if [ -f "$PUB_KEY_FILE" ]; then
     JSON_PAYLOAD=$(printf '{"token":"%s","public_key":"%s"}' "$GASAK_DIST_TOKEN" "$PURE_KEY")
 
     HTTP_STATUS=$(curl -s -o "$VAULT_FILE" -w "%{http_code}" \
-        -X POST \
-        -H "Content-Type: application/json" \
-        -d "$JSON_PAYLOAD" \
-        "${VAULT_URL}/getenv")
+            -X POST \
+            -H "Content-Type: application/json" \
+            -H "X-Gasak-Host: ${DEVICE_HOST}" \
+            -d "$JSON_PAYLOAD" \
+            "${VAULT_URL}/getenv")
 
     if [ "$HTTP_STATUS" -eq 200 ]; then
         echo -e "  ${GREEN}✔${RESET}  Local vault synchronized and locked successfully"

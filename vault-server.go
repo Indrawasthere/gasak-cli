@@ -34,17 +34,19 @@ const (
 )
 
 type SecretPayload struct {
-	GLPIUrl       string `json:"GLPI_URL"`
-	OutlineURL    string `json:"OUTLINE_URL"`
-	OutlineAPIKey string `json:"OUTLINE_API_KEY"`
-	LinearAPIKey  string `json:"LINEAR_API_KEY"`
-	SshUser       string `json:"PARKEE_SSH_USER"`
-	SshPass       string `json:"PARKEE_SSH_PASS"`
-	CmsDbHost     string `json:"CMS_DB_HOST"`
-	CmsDbPort     string `json:"CMS_DB_PORT"`
-	CmsDbUser     string `json:"CMS_DB_USER"`
-	CmsDbPass     string `json:"CMS_DB_PASS"`
-	CmsDbName     string `json:"CMS_DB_NAME"`
+	GLPIUrl         string `json:"GLPI_URL"`
+	OutlineURL      string `json:"OUTLINE_URL"`
+	OutlineAPIKey   string `json:"OUTLINE_API_KEY"`
+	LinearAPIKey    string `json:"LINEAR_API_KEY"`
+	SshUser         string `json:"PARKEE_SSH_USER"`
+	SshPass         string `json:"PARKEE_SSH_PASS"`
+	CmsDbHost       string `json:"CMS_DB_HOST"`
+	CmsDbPort       string `json:"CMS_DB_PORT"`
+	CmsDbUser       string `json:"CMS_DB_USER"`
+	CmsDbPass       string `json:"CMS_DB_PASS"`
+	CmsDbName       string `json:"CMS_DB_NAME"`
+	GsheetDeployId  string `json:"GSHEET_DEPLOY_ID"`
+	GsheetDeployGid string `json:"GSHEET_DEPLOY_GID"`
 }
 
 type ClientRequest struct {
@@ -111,17 +113,19 @@ func handleGetEnv(w http.ResponseWriter, r *http.Request) {
 
 	// Load seluruh data .env sakti dari server supeng ke struct
 	secrets := SecretPayload{
-		GLPIUrl:       os.Getenv("GLPI_URL"),
-		OutlineURL:    os.Getenv("OUTLINE_URL"),
-		OutlineAPIKey: os.Getenv("OUTLINE_API_KEY"),
-		LinearAPIKey:  os.Getenv("LINEAR_API_KEY"),
-		SshUser:       os.Getenv("PARKEE_SSH_USER"),
-		SshPass:       os.Getenv("PARKEE_SSH_PASS"),
-		CmsDbHost:     os.Getenv("CMS_DB_HOST"),
-		CmsDbPort:     os.Getenv("CMS_DB_PORT"),
-		CmsDbUser:     os.Getenv("CMS_DB_USER"),
-		CmsDbPass:     os.Getenv("CMS_DB_PASS"),
-		CmsDbName:     os.Getenv("CMS_DB_NAME"),
+		GLPIUrl:         os.Getenv("GLPI_URL"),
+		OutlineURL:      os.Getenv("OUTLINE_URL"),
+		OutlineAPIKey:   os.Getenv("OUTLINE_API_KEY"),
+		LinearAPIKey:    os.Getenv("LINEAR_API_KEY"),
+		SshUser:         os.Getenv("PARKEE_SSH_USER"),
+		SshPass:         os.Getenv("PARKEE_SSH_PASS"),
+		CmsDbHost:       os.Getenv("CMS_DB_HOST"),
+		CmsDbPort:       os.Getenv("CMS_DB_PORT"),
+		CmsDbUser:       os.Getenv("CMS_DB_USER"),
+		CmsDbPass:       os.Getenv("CMS_DB_PASS"),
+		CmsDbName:       os.Getenv("CMS_DB_NAME"),
+		GsheetDeployId:  os.Getenv("GSHEET_DEPLOY_ID"),
+		GsheetDeployGid: os.Getenv("GSHEET_DEPLOY_GID"),
 	}
 
 	plaintext, err := json.Marshal(secrets)
