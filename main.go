@@ -1,8 +1,6 @@
 package main
 
 import (
-	"context"
-	"database/sql"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -24,7 +22,7 @@ import (
 )
 
 const (
-	AppVersion = "1.1.224"
+	AppVersion = "1.1.25"
 )
 
 var (
@@ -72,19 +70,25 @@ func init() {
 	}
 
 	// ── Priority 2: .env fallback ─────────────────────────────────
-	// Fallback buat backward compatibility — engineer yang belum
-	// curl ulang installer setelah vault rollout tetap bisa jalan
 	if !vaultLoaded {
 		home, _ := os.UserHomeDir()
 		locations := []string{
-			".env",
 			filepath.Join(home, "gasak-dist", ".env"),
 			filepath.Join(home, ".env"),
+			".env",
 		}
+
+		envLoaded := false
 		for _, loc := range locations {
-			if err := godotenv.Load(loc); err == nil {
+			if err := godotenv.Overload(loc); err == nil {
+				logInfo("Env loaded from: " + loc)
+				envLoaded = true
 				break
 			}
+		}
+
+		if !envLoaded {
+			logWarn("No .env file found in any location")
 		}
 	}
 
@@ -1715,102 +1719,29 @@ type GateInfo struct {
 }
 
 func queryGatesFromDB(tpUser *TeleportUser, loc *Location) ([]GateInfo, error) {
-	// For L2: Try Teleport query first (local DB on server)
+	// L2: Langsung via Teleport (server@server-xxx)
 	if tpUser.IsL2 {
-		gates, err := queryGatesViaTeleport(tpUser, loc)
-		if err == nil {
-			return gates, nil
-		}
-		logWarn("Teleport query gagal, coba direct DB connection...")
+		return queryGatesViaTeleport(tpUser, loc)
 	}
 
-	// For L1 or L2 fallback: Use direct DB query (same pattern as settlement_rfs)
-	// L1 sudah punya credentials via CMS_DB_* env vars
-	return queryGatesDirectDB(loc)
-}
-
-func queryGatesDirectDB(loc *Location) ([]GateInfo, error) {
-	if CmsDbHost == "" || CmsDbUser == "" || CmsDbPass == "" || CmsDbName == "" {
-		return nil, fmt.Errorf("CMS DB credentials belum di-set. Pastiin .env atau vault sudah dikonfigurasi")
-	}
-
-	connString := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		CmsDbHost, CmsDbPort, CmsDbUser, CmsDbPass, CmsDbName,
-	)
-
-	db, err := sql.Open("postgres", connString)
-	if err != nil {
-		return nil, fmt.Errorf("DB connection gagal: %w", err)
-	}
-	defer db.Close()
-
-	// Test connection
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := db.PingContext(ctx); err != nil {
-		return nil, fmt.Errorf("DB unreachable (%s): %w", CmsDbHost, err)
-	}
-
-	// Query gate list dari core_user_activity (sama seperti queryGatesViaTeleport)
-	query := `
-SELECT DISTINCT ON(user_pc)
-    user_pc,
-    ip_address
-FROM core_user_activity
-WHERE lower(user_pc) LIKE '%' || (SELECT lower(unique_code) FROM location) || '%'
-  AND deleted_at IS NULL
-  AND action_type = 'LOGIN'
-  AND created_at >= NOW() - INTERVAL '30 days'
-ORDER BY user_pc, created_at DESC;
-`
-
-	rows, err := db.QueryContext(context.Background(), query)
-	if err != nil {
-		return nil, fmt.Errorf("query gate gagal: %w", err)
-	}
-	defer rows.Close()
-
-	var gates []GateInfo
-	for rows.Next() {
-		var g GateInfo
-		if err := rows.Scan(&g.UserPC, &g.IP); err != nil {
-			logWarn(fmt.Sprintf("Gagal scan row: %v", err))
-			continue
-		}
-		gates = append(gates, g)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("row iteration gagal: %w", err)
-	}
-
-	if len(gates) == 0 {
-		return nil, fmt.Errorf("tidak ada gate ditemukan untuk lokasi %s", loc.Unicode)
-	}
-
-	return gates, nil
+	// L1: Via SSH ke server dulu, baru jalankan psql di sana
+	return queryGatesViaSSH(loc)
 }
 
 func queryGatesViaTeleport(tpUser *TeleportUser, loc *Location) ([]GateInfo, error) {
-	nodeName := "server-" + strings.ToLower(loc.Unicode)
+	nodeName := nodeNameFromUnicode(loc.Unicode)
 	dbName := "agent_" + strings.ToLower(loc.Unicode)
 
-	query := `
-SELECT DISTINCT ON(user_pc)
-    user_pc,
-    ip_address
-FROM core_user_activity
-WHERE lower(user_pc) LIKE '%' || (SELECT lower(unique_code) FROM location) || '%'
-AND deleted_at IS NULL
-AND action_type = 'LOGIN'
-AND created_at >= NOW() - INTERVAL '30 days'
-ORDER BY user_pc, created_at DESC;
-`
-	query = strings.ReplaceAll(query, "\n", " ")
+	unicode := strings.ToLower(loc.Unicode)
+	query := fmt.Sprintf(
+		"SELECT DISTINCT ON(user_pc) user_pc, ip_address FROM core_user_activity WHERE lower(user_pc) LIKE '%%%s%%' AND deleted_at IS NULL AND action_type = 'LOGIN' AND created_at >= NOW() - INTERVAL '30 days' ORDER BY user_pc, created_at DESC;",
+		unicode,
+	)
 
+	pgPass := fmt.Sprintf("%s545115", unicode)
 	cmdStr := fmt.Sprintf(
-		`psql -h localhost -d %s -U agent -At -F '|' -c "%s"`,
+		`PGPASSWORD='%s' psql -h localhost -d %s -U agent -At -F '|' -c "%s"`,
+		pgPass,
 		dbName,
 		query,
 	)
@@ -1824,14 +1755,57 @@ ORDER BY user_pc, created_at DESC;
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("query gate gagal: %v | %s", err, string(output))
+		return nil, fmt.Errorf("teleport query failed: %v | %s", err, string(output))
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	return parseGateOutput(string(output))
+}
+
+func queryGatesViaSSH(loc *Location) ([]GateInfo, error) {
+	dbName := "agent_" + strings.ToLower(loc.Unicode)
+	unicode := strings.ToLower(loc.Unicode)
+
+	query := fmt.Sprintf(
+		"SELECT DISTINCT ON(user_pc) user_pc, ip_address FROM core_user_activity WHERE lower(user_pc) LIKE '%%%s%%' AND deleted_at IS NULL AND action_type = 'LOGIN' AND created_at >= NOW() - INTERVAL '30 days' ORDER BY user_pc, created_at DESC;",
+		unicode,
+	)
+
+	pgPass := fmt.Sprintf("%s545115", unicode)
+	psqlCmd := fmt.Sprintf(
+		`PGPASSWORD='%s' psql -h localhost -d %s -U agent -At -F '|' -c "%s"`,
+		pgPass,
+		dbName,
+		query,
+	)
+
+	cmd := exec.Command(
+		"sshpass", "-p", SshPass,
+		"ssh",
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "ConnectTimeout=5",
+		fmt.Sprintf("support@%s", loc.IP),
+		psqlCmd,
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("ssh query failed: %v | %s", err, string(output))
+	}
+
+	return parseGateOutput(string(output))
+}
+
+func parseGateOutput(output string) ([]GateInfo, error) {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
 	var gates []GateInfo
 
 	for _, line := range lines {
-		parts := strings.Split(line, "|")
+		cleanedLine := strings.TrimSpace(line)
+		if cleanedLine == "" {
+			continue
+		}
+
+		parts := strings.Split(cleanedLine, "|")
 		if len(parts) != 2 {
 			continue
 		}
@@ -1840,6 +1814,10 @@ ORDER BY user_pc, created_at DESC;
 			UserPC: strings.TrimSpace(parts[0]),
 			IP:     strings.TrimSpace(parts[1]),
 		})
+	}
+
+	if len(gates) == 0 {
+		return nil, fmt.Errorf("tidak ada gate ditemukan")
 	}
 
 	return gates, nil
