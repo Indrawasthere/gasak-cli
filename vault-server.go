@@ -1,12 +1,5 @@
 package main
 
-// ─────────────────────────────────────────────────────────────
-// GASAK VAULT SERVER — HYBRID SECURITY ENGINE
-// Port: 9002 di Server Supeng
-// Menerima Public Key Client via HTTP, Melakukan Hybrid Encryption
-// Dan Menyediakan Endpoint API Terpusat untuk Ambil Log Agent
-// ─────────────────────────────────────────────────────────────
-
 import (
 	"crypto/aes"
 	"crypto/cipher"
@@ -14,7 +7,6 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -22,10 +14,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
-	_ "github.com/lib/pq" // Driver PostgreSQL untuk koneksi DB pusat
+	_ "github.com/lib/pq"
 )
 
 const (
@@ -51,7 +44,7 @@ type SecretPayload struct {
 
 type ClientRequest struct {
 	Token     string `json:"token"`
-	PublicKey string `json:"public_key"` // PEM string dari client
+	PublicKey string `json:"public_key"`
 }
 
 type OutboundVault struct {
@@ -60,7 +53,6 @@ type OutboundVault struct {
 	Nonce        string `json:"nonce"`
 }
 
-// Cukup dideklarasikan SEKALI di sini men biar gak bentrok redeclared error!
 type LocateResponse struct {
 	NamaLokasi string `json:"nama_lokasi"`
 	IPAddress  string `json:"ip_address"`
@@ -96,14 +88,12 @@ func handleGetEnv(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validasi token distribusi biar ga sembarang orang bisa nembak vault
 	if req.Token != "gsk_dist_9f2k7x" {
 		w.WriteHeader(http.StatusUnauthorized)
 		logAccess(r, http.StatusUnauthorized, "Token distribusi tidak valid")
 		return
 	}
 
-	// PEMBERSIH UTK PUBLIC KEY PEM
 	pubKeyStr := req.PublicKey
 	pubKeyStr = strings.ReplaceAll(pubKeyStr, `\n`, "\n")
 	pubKeyStr = strings.TrimSpace(pubKeyStr)
@@ -111,7 +101,6 @@ func handleGetEnv(w http.ResponseWriter, r *http.Request) {
 		pubKeyStr = fmt.Sprintf("-----BEGIN PUBLIC KEY-----\n%s\n-----END PUBLIC KEY-----", pubKeyStr)
 	}
 
-	// Load seluruh data .env sakti dari server supeng ke struct
 	secrets := SecretPayload{
 		GLPIUrl:         os.Getenv("GLPI_URL"),
 		OutlineURL:      os.Getenv("OUTLINE_URL"),
@@ -134,7 +123,6 @@ func handleGetEnv(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Jalankan Hybrid Encryption (Bungkus payload pake Public Key si client)
 	outbound, err := encryptHybrid(plaintext, pubKeyStr)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -147,7 +135,6 @@ func handleGetEnv(w http.ResponseWriter, r *http.Request) {
 }
 
 func encryptHybrid(plaintext []byte, pubKeyPEM string) (*OutboundVault, error) {
-	// SANITIZER: Ubah teks literal "\n" menjadi byte newline asli (\n)
 	pubKeyPEM = strings.ReplaceAll(pubKeyPEM, `\n`, "\n")
 	pubKeyPEM = strings.TrimSpace(pubKeyPEM)
 
@@ -166,13 +153,11 @@ func encryptHybrid(plaintext []byte, pubKeyPEM string) (*OutboundVault, error) {
 		return nil, fmt.Errorf("bukan RSA Public Key")
 	}
 
-	// 1. Generate Ephemeral 32-byte AES Key secara acak
 	aesKey := make([]byte, 32)
 	if _, err := rand.Read(aesKey); err != nil {
 		return nil, err
 	}
 
-	// 2. Encrypt Payload menggunakan AES-256-GCM (Symmetric)
 	aesBlock, err := aes.NewCipher(aesKey)
 	if err != nil {
 		return nil, err
@@ -187,7 +172,6 @@ func encryptHybrid(plaintext []byte, pubKeyPEM string) (*OutboundVault, error) {
 	}
 	ciphertext := gcm.Seal(nil, nonce, plaintext, nil)
 
-	// 3. Bungkus AES Key menggunakan RSA Public Key Client (Asymmetric)
 	encryptedKey, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, rsaPubKey, aesKey, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to envelope key: %w", err)
@@ -203,93 +187,90 @@ func encryptHybrid(plaintext []byte, pubKeyPEM string) (*OutboundVault, error) {
 func handleLocateGate(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	// Validasi token internal distribusi
 	token := r.Header.Get("X-Gasak-Token")
 	if token != "gsk_dist_9f2k7x" {
 		w.WriteHeader(http.StatusUnauthorized)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Unauthorized internal token!"})
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": "Unauthorized",
+		})
 		return
 	}
 
-	keyword := r.URL.Query().Get("keyword")
+	keyword := strings.ToLower(r.URL.Query().Get("keyword"))
 	if keyword == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Parameter keyword lokasi wajib diisi!"})
 		return
 	}
 
-	// Load DB Credentials dari Vault Environment
-	dbHost := os.Getenv("CMS_DB_HOST")
-	dbPort := os.Getenv("CMS_DB_PORT")
-	dbUser := os.Getenv("CMS_DB_USER")
-	dbPass := os.Getenv("CMS_DB_PASS")
-	dbName := os.Getenv("CMS_DB_NAME")
-	if dbPort == "" {
-		dbPort = "5432"
-	}
-
-	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable", dbHost, dbPort, dbUser, dbPass, dbName)
-	db, err := sql.Open("postgres", dsn)
+	gates, err := queryGateViaTeleport(keyword)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Koneksi ke CMS DB Gagal: " + err.Error()})
-		return
-	}
-	defer db.Close()
-
-	// UPGRADE: Query Sakti Gabungan (Filter IP 10.70.% + Join Reader Information)
-	query := `
-        SELECT
-            data_collection.user_pc,
-            (
-                SELECT trim(ip)
-                FROM unnest(string_to_array(data_collection.ip_address, ' ')) AS ip
-                WHERE ip LIKE '10.70.%'
-                LIMIT 1
-            ) AS ip_address
-        FROM (
-            WITH ranked_data AS (
-                SELECT user_pc, app_version, ip_address,
-                       ROW_NUMBER() OVER (PARTITION BY user_pc ORDER BY created_at DESC) AS rn
-                FROM (
-                    SELECT created_at, ip_address, user_pc, app_version
-                    FROM core_user_activity
-                    WHERE lower(user_pc) LIKE '%' || $1 || '%'
-                      AND deleted_at IS NULL
-                      AND action_type = 'LOGIN'
-                      AND created_at >= NOW() - INTERVAL '31 days'
-                ) AS get_data
-            )
-            SELECT user_pc, app_version, ip_address FROM ranked_data WHERE rn = 1
-        ) AS data_collection
-        INNER JOIN reader_information AS reader ON reader.pc_name = data_collection.user_pc
-        ORDER BY data_collection.app_version, data_collection.ip_address, data_collection.user_pc;`
-
-	rows, err := db.Query(query, strings.ToLower(keyword))
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Query execution failed: " + err.Error()})
-		return
-	}
-	defer rows.Close()
-
-	var gates []LocateResponse
-	for rows.Next() {
-		var g LocateResponse
-		if err := rows.Scan(&g.NamaLokasi, &g.IPAddress); err == nil {
-			if g.IPAddress != "" {
-				gates = append(gates, g)
-			}
-		}
-	}
-
-	if len(gates) == 0 {
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Data gate tidak ditemukan untuk lokasi ini!"})
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": err.Error(),
+		})
 		return
 	}
 
 	_ = json.NewEncoder(w).Encode(gates)
+}
+
+func queryGateViaTeleport(keyword string) ([]LocateResponse, error) {
+	nodeName := "server-" + keyword
+	dbName := "agent_" + keyword
+
+	query := `
+SELECT DISTINCT ON(user_pc)
+	user_pc || '@' || ip_address AS host_and_ip
+FROM core_user_activity
+WHERE lower(user_pc) LIKE '%' || (SELECT lower(unique_code) FROM location) || '%'
+  AND deleted_at IS NULL
+  AND action_type = 'LOGIN'
+  AND created_at >= NOW() - INTERVAL '30 days'
+ORDER BY user_pc, created_at DESC;
+`
+
+	query = strings.ReplaceAll(query, "\n", " ")
+	query = strings.ReplaceAll(query, "\t", " ")
+
+	cmdStr := fmt.Sprintf(
+		`psql -h localhost -d %s -U agent -At -c "%s"`,
+		dbName,
+		query,
+	)
+
+	cmd := exec.Command(
+		"tsh",
+		"ssh",
+		fmt.Sprintf("server@%s", nodeName),
+		cmdStr,
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("teleport query failed: %v | %s", err, string(output))
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	var gates []LocateResponse
+
+	for _, line := range lines {
+		cleanedLine := strings.TrimSpace(line)
+		if cleanedLine == "" {
+			continue
+		}
+
+		parts := strings.Split(cleanedLine, "@")
+		if len(parts) != 2 {
+			continue
+		}
+
+		gates = append(gates, LocateResponse{
+			NamaLokasi: parts[0],
+			IPAddress:  parts[1],
+		})
+	}
+
+	return gates, nil
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
