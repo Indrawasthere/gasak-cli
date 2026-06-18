@@ -1430,116 +1430,55 @@ func checkPythonTk() bool {
 }
 
 func runFetchLog() {
-	// ─── STEP 1: FETCH DATA LOKASI LIVE DARI SPREADSHEET (Mekanisme Pure Vault) ───
-	// Menggunakan SpreadsheetID dan SheetGID yang otomatis di-inject oleh loadVault()
-	if SpreadsheetID == "" || SheetGID == "" {
-		logErr("Spreadsheet ID atau GID kosong di Vault / .env men!")
-		return
-	}
-
-	logInfo("Mengambil data standarisasi lokasi dari Google Sheet...")
-	urlTarget := fmt.Sprintf("https://docs.google.com/spreadsheets/d/%s/export?format=csv&gid=%s", SpreadsheetID, SheetGID)
-
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Get(urlTarget)
+	// ─── STEP 1: LOAD DATA LOKASI VIA CORE FUNCTION ───
+	locs, err := loadLocations()
 	if err != nil {
-		logErr("Gagal koneksi download data lokasi: " + err.Error())
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		logErr(fmt.Sprintf("Gagal fetch data lokasi sheet, HTTP status: %d", resp.StatusCode))
+		logErr("Gagal load data lokasi: " + err.Error())
 		return
 	}
 
-	reader := csv.NewReader(resp.Body)
-	// Skip baris header pertama di spreadsheet
-	_, _ = reader.Read()
+	// ─── STEP 2: DROP DOWN SELECTOR LOKASI DENGAN FILTERING ───
+	options := make([]huh.Option[string], 0, len(locs))
+	for _, l := range locs {
+		label := fmt.Sprintf("%-8s | %-45s | %s", l.Unicode, truncate(l.Nama, 45), l.IP)
+		options = append(options, huh.NewOption(label, l.Unicode))
+	}
 
-	var allLocations []Location
-	for {
-		record, err := reader.Read()
-		if err == io.EOF {
+	var selectedUnicode string
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Pilih lokasi yang mau diambil log-nya men:").
+				Description(fmt.Sprintf("%d lokasi aktif ditemukan", len(locs))).
+				Options(options...).
+				Value(&selectedUnicode).
+				Filtering(true),
+		),
+	).WithTheme(crushTheme())
+
+	if err := form.Run(); err != nil {
+		logWarn("Proses pencarian lokasi dibatalkan.")
+		return
+	}
+
+	var selectedLoc *Location
+	for _, l := range locs {
+		if l.Unicode == selectedUnicode {
+			loc := l
+			selectedLoc = &loc
 			break
 		}
-		if err != nil {
-			continue
-		}
-		// Parsing kolom sesuai standarisasi: [0]=Unicode, [1]=Nama, [2]=IP
-		if len(record) >= 3 {
-			allLocations = append(allLocations, Location{
-				Unicode: strings.TrimSpace(strings.ToLower(record[0])),
-				Nama:    strings.TrimSpace(record[1]),
-				IP:      strings.TrimSpace(record[2]),
-			})
-		}
 	}
 
-	if len(allLocations) == 0 {
-		logErr("Data lokasi kosong atau format spreadsheet tidak sesuai men!")
+	if selectedLoc == nil {
+		logErr("Lokasi kagak ketemu men!")
 		return
-	}
-
-	// ─── STEP 2: INPUT SEARCH KEYWORD ───
-	var inputKeyword string
-	err = huh.NewInput().
-		Title("Location Lookup (Fetch Log)").
-		Description("Masukkan nama lokasi / unicode (Contoh: 1at, 0eu, blok m):").
-		Value(&inputKeyword).
-		Run()
-
-	if err != nil {
-		logWarn("Proses dibatalkan oleh user.")
-		return
-	}
-
-	inputKeyword = strings.TrimSpace(strings.ToLower(inputKeyword))
-	if inputKeyword == "" {
-		logErr("Keyword pencarian tidak boleh kosong men!")
-		return
-	}
-
-	// Saring lokasi yang cocok berdasarkan input user
-	var matchedLocations []Location
-	for _, loc := range allLocations {
-		if strings.Contains(strings.ToLower(loc.Nama), inputKeyword) ||
-			strings.Contains(strings.ToLower(loc.Unicode), inputKeyword) {
-			matchedLocations = append(matchedLocations, loc)
-		}
-	}
-
-	if len(matchedLocations) == 0 {
-		logErr("Lokasi kagak ketemu men! Coba cek keyword-nya lagi.")
-		return
-	}
-
-	// Jika ada beberapa lokasi yang mirip, munculin picker interaktif
-	var selectedLoc Location
-	if len(matchedLocations) == 1 {
-		selectedLoc = matchedLocations[0]
-	} else {
-		var locOpts []huh.Option[Location]
-		for _, loc := range matchedLocations {
-			locOpts = append(locOpts, huh.NewOption(fmt.Sprintf("%s [%s] - %s", loc.Nama, strings.ToUpper(loc.Unicode), loc.IP), loc))
-		}
-
-		err = huh.NewSelect[Location]().
-			Title("Pilih Lokasi Teridentifikasi:").
-			Options(locOpts...).
-			Value(&selectedLoc).
-			Run()
-
-		if err != nil {
-			logWarn("Proses dibatalkan.")
-			return
-		}
 	}
 
 	logOK(fmt.Sprintf("Target Terpilih: %s [%s] — %s", selectedLoc.Nama, strings.ToUpper(selectedLoc.Unicode), selectedLoc.IP))
 	fmt.Println()
 
-	// ─── STEP 3: ROLE DETECTION (L1 / L2 PENAMBAT SAFETY LAYER) ───
+	// ─── STEP 3: ROLE DETECTION (L1 / L2 SAFETY LAYER) ───
 	isUserL2 := false
 	currentUsername := "support"
 	if os.Getenv("GASAK_ROLE") == "admin" || os.Getenv("GASAK_ROLE") == "l2" || os.Getenv("PARKEE_SSH_USER") == "server" {
@@ -1552,52 +1491,46 @@ func runFetchLog() {
 		IsL2:     isUserL2,
 	}
 
-	// ─── STEP 4: TAMPILAN MENU PILIH TIPE LOG ───
-	var logType string
-	err = huh.NewSelect[string]().
-		Title(fmt.Sprintf("Pilih tipe log dari %s yang mau diambil:", selectedLoc.Nama)).
-		Options(
-			huh.NewOption("Watersheep Log", "watersheep"),
-			huh.NewOption("Fisherman Log", "fisherman"),
-			huh.NewOption("Syslog / System Log", "syslog"),
-			huh.NewOption("PostgreSQL DB Log (L2 Only)", "postgres"),
-			huh.NewOption("Parkee Agent Log (/var/tmp/application)", "agent_tmp"),
-			huh.NewOption("Parkee Agent Log (/var/log/agent/parkee-agent)", "agent_var"),
-		).
-		Value(&logType).
-		Run()
+	// ─── STEP 4: GENERATE MENU OPSI LOG DARI STRUCT logSources ───
+	var logOpts []huh.Option[int] // simpan index dari logSources
+	for idx, src := range logSources {
+		// Validasi filter: kalau log khusus L2 tapi user saat ini cuma L1, skip jangan tampilin
+		if src.AllowedForL2 && !tpUser.IsL2 {
+			continue
+		}
+		logOpts = append(logOpts, huh.NewOption(src.Name, idx))
+	}
 
-	if err != nil {
-		logWarn("Proses dibatalkan.")
+	var selectedLogIdx int
+	logForm := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[int]().
+				Title(fmt.Sprintf("Pilih tipe log dari %s yang mau diambil:", selectedLoc.Nama)).
+				Options(logOpts...).
+				Value(&selectedLogIdx),
+		),
+	).WithTheme(crushTheme())
+
+	if err := logForm.Run(); err != nil {
+		logWarn("Proses pemilihan log dibatalkan.")
 		return
 	}
 
-	// ─── STEP 5: EKSEKUSI DOWNSTREAM & AUTOMATIC JUMPING CLEANUP ───
-	switch logType {
+	// Ambil metadata target log berdasarkan index terpilih
+	chosenLog := logSources[selectedLogIdx]
 
-	case "watersheep":
-		fetchLogFromDir(tpUser, &selectedLoc, "/var/log/watersheep", "Watersheep Log")
-
-	case "fisherman":
-		fetchLogFromDir(tpUser, &selectedLoc, "/var/log/fisherman", "Fisherman Log")
-
-	case "syslog":
-		fetchSingleFile(tpUser, &selectedLoc, "/var/log/syslog", "System Log")
-
-	case "postgres":
-		if !tpUser.IsL2 {
-			logErr("Role L1 (support) gaboleh dan gabisa buat narik PostgreSQL log, men!")
-			return
+	// ─── STEP 5: EKSEKUSI UTILITY SINKRON BERDASARKAN METADATA STRUCT ───
+	if chosenLog.IsAgentLog {
+		logInfo("Memulai orchestrator pemanggilan cluster gate via internal bridge...")
+		// Kirim ke handler agent gate log bawaan lo (jumping via DB gate)
+		fetchAgentGateLog(tpUser, selectedLoc, chosenLog.Path, chosenLog.Name)
+	} else {
+		// Ambil log dari server main lokasi langsung
+		if chosenLog.IsDir {
+			fetchLogFromDir(tpUser, selectedLoc, chosenLog.Path, chosenLog.Name)
+		} else {
+			fetchSingleFile(tpUser, selectedLoc, chosenLog.Path, chosenLog.Name)
 		}
-		fetchLogFromDir(tpUser, &selectedLoc, "/var/log/postgresql", "PostgreSQL Log")
-
-	case "agent_tmp":
-		logInfo("Memulai orchestrator pemanggilan cluster gate via internal bridge...")
-		fetchAgentGateLog(tpUser, &selectedLoc, "/var/tmp", "Agent Log (Application TMP)")
-
-	case "agent_var":
-		logInfo("Memulai orchestrator pemanggilan cluster gate via internal bridge...")
-		fetchAgentGateLog(tpUser, &selectedLoc, "/var/log/agent", "Agent Log (Parkee Agent VAR)")
 	}
 }
 
