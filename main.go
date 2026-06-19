@@ -23,8 +23,10 @@ import (
 )
 
 const (
-	AppVersion = "1.2.0-c72ba44"
+	AppVersion = "1.2.0"
 )
+
+var GitCommit = "c72ba44"
 
 var (
 	CacheTTL = time.Hour
@@ -416,92 +418,133 @@ func max3(a, b, c int) int {
 }
 
 func checkAndRunUpdate() {
-	client := http.Client{Timeout: 1 * time.Second}
+	client := http.Client{Timeout: 2 * time.Second}
+
 	resp, err := client.Get(UpdateURL)
 	if err != nil {
 		return
 	}
 	defer resp.Body.Close()
 
-	serverVerBytes, err := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return
 	}
-	serverVersion := strings.TrimSpace(string(serverVerBytes))
 
-	if serverVersion != "" && serverVersion != AppVersion {
-		fmt.Printf("\x1b[33m⚠ Versi baru ada nich (%s). Jalanin auto-update, tungguin men...\x1b[0m\n", serverVersion)
+	// FORMAT: "1.2.1|c72ba44"
+	serverRaw := strings.TrimSpace(string(raw))
+	parts := strings.Split(serverRaw, "|")
 
-		execPath, err := os.Executable()
+	if len(parts) == 0 || parts[0] == "" {
+		return
+	}
+
+	serverVersion := parts[0]
+	serverCommit := ""
+	if len(parts) > 1 {
+		serverCommit = parts[1]
+	}
+
+	// only compare VERSION, not commit
+	if serverVersion == AppVersion {
+		return
+	}
+
+	fmt.Printf(
+		"\x1b[33m⚠ Update ada nih men: %s (%s). Starting auto-update...\x1b[0m\n",
+		serverVersion,
+		serverCommit,
+	)
+
+	execPath, err := os.Executable()
+	if err != nil {
+		return
+	}
+
+	// safer download target (avoid corrupt binary)
+	tmpPath := execPath + ".new"
+
+	respBin, err := http.Get(BinaryURL)
+	if err != nil {
+		fmt.Println("\x1b[31m✘ Wadaw gagal download update binary\x1b[0m")
+		time.Sleep(1 * time.Second)
+		return
+	}
+	defer respBin.Body.Close()
+
+	out, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+	if err != nil {
+		return
+	}
+
+	_, err = io.Copy(out, respBin.Body)
+	out.Close()
+
+	if err != nil {
+		os.Remove(tmpPath)
+		fmt.Println("\x1b[31m✘ Wadaw gagal write update binary\x1b[0m")
+		return
+	}
+
+	// replace binary safely
+	err = os.Rename(tmpPath, execPath)
+	if err != nil {
+		fmt.Println("\x1b[31m✘ Wadaw gagal buat replace binary\x1b[0m")
+		return
+	}
+
+	fmt.Println("\x1b[32m✔ Binary updated done\x1b[0m")
+
+	// sync scripts
+	distDir := filepath.Join(os.Getenv("HOME"), "gasak-dist")
+	_ = os.MkdirAll(distDir, 0755)
+
+	scripts := []string{
+		"deploy_parkee.py",
+		"settlement_rfs.py",
+		"decode_and_merge.py",
+		"log_cleaner.py",
+		"install.sh",
+	}
+
+	baseURL := "http://10.70.0.110:9001"
+	hostname, _ := os.Hostname()
+
+	httpClient := &http.Client{Timeout: 15 * time.Second}
+
+	for _, s := range scripts {
+		url := baseURL + "/" + s
+		dest := filepath.Join(distDir, s)
+
+		req, err := http.NewRequest("GET", url, nil)
 		if err != nil {
-			return
+			continue
 		}
 
-		respBin, err := http.Get(BinaryURL)
+		req.Header.Set("X-Gasak-Host", hostname)
+
+		resp, err := httpClient.Do(req)
 		if err != nil {
-			fmt.Println("\x1b[31m✘ Ini gagal men, help senggol Fadlan dah\x1b[0m")
-			time.Sleep(1 * time.Second)
-			return
+			continue
 		}
-		defer respBin.Body.Close()
 
-		os.Remove(execPath)
-
-		out, err := os.OpenFile(execPath, os.O_CREATE|os.O_WRONLY, 0755)
+		f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 		if err != nil {
-			return
+			resp.Body.Close()
+			continue
 		}
-		defer out.Close()
 
-		_, err = io.Copy(out, respBin.Body)
+		_, err = io.Copy(f, resp.Body)
+		f.Close()
+		resp.Body.Close()
+
 		if err == nil {
-			fmt.Println("\x1b[32m✔ Binary update, wait syncing script terbaru men...\x1b[0m")
-
-			distDir := filepath.Join(os.Getenv("HOME"), "gasak-dist")
-			scripts := []string{
-				"deploy_parkee.py",
-				"settlement_rfs.py",
-				"decode_and_merge.py",
-				"log_cleaner.py",
-				"install.sh",
-			}
-
-			baseURL := "http://10.70.0.110:9001"
-			hostname, _ := os.Hostname()
-
-			for _, s := range scripts {
-				url := baseURL + "/" + s
-				dest := filepath.Join(distDir, s)
-
-				req, err := http.NewRequest("GET", url, nil)
-				if err != nil {
-					continue
-				}
-				req.Header.Set("X-Gasak-Host", hostname)
-
-				client := &http.Client{Timeout: 15 * time.Second}
-				resp, err := client.Do(req)
-				if err != nil {
-					continue
-				}
-
-				f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-				if err != nil {
-					resp.Body.Close()
-					continue
-				}
-
-				io.Copy(f, resp.Body)
-				f.Close()
-				resp.Body.Close()
-
-				fmt.Printf("\x1b[32m✔ %s updated\x1b[0m\n", s)
-			}
-
-			fmt.Println("\x1b[32m✔ DONE! GASAK udah berhasil di-update ke versi latest! Jalan lupa source zsh atau bash terus ketik gasak lagi men\x1b[0m")
-			os.Exit(0)
+			fmt.Printf("\x1b[32m✔ %s updated\x1b[0m\n", s)
 		}
 	}
+
+	fmt.Println("\x1b[32m✔ UPDATE DONE MEN — source zsh / bash terus gasak again\x1b[0m")
+	os.Exit(0)
 }
 
 func main() {
