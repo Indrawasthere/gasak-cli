@@ -23,10 +23,8 @@ import (
 )
 
 const (
-	AppVersion = "1.2.0"
+	AppVersion = "1.2.4"
 )
-
-var GitCommit = "c72ba44"
 
 var (
 	CacheTTL = time.Hour
@@ -418,154 +416,92 @@ func max3(a, b, c int) int {
 }
 
 func checkAndRunUpdate() {
-	// 🧠 prevent re-entry loop after update
-	lockFile := filepath.Join(os.TempDir(), "gasak_update_lock")
-	if _, err := os.Stat(lockFile); err == nil {
-		os.Remove(lockFile)
-		return
-	}
-
-	client := http.Client{Timeout: 2 * time.Second}
-
+	client := http.Client{Timeout: 1 * time.Second}
 	resp, err := client.Get(UpdateURL)
 	if err != nil {
 		return
 	}
 	defer resp.Body.Close()
 
-	raw, err := io.ReadAll(resp.Body)
+	serverVerBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return
 	}
+	serverVersion := strings.TrimSpace(string(serverVerBytes))
 
-	serverRaw := strings.TrimSpace(string(raw))
+	if serverVersion != "" && serverVersion != AppVersion {
+		fmt.Printf("\x1b[33m⚠ Versi baru ada nich (%s). Jalanin auto-update, tungguin men...\x1b[0m\n", serverVersion)
 
-	// 🧠 normalize format (support | or - or plain)
-	var serverVersion, serverCommit string
-
-	if strings.Contains(serverRaw, "|") {
-		parts := strings.SplitN(serverRaw, "|", 2)
-		serverVersion = parts[0]
-		if len(parts) > 1 {
-			serverCommit = parts[1]
-		}
-	} else if strings.Contains(serverRaw, "-") {
-		parts := strings.SplitN(serverRaw, "-", 2)
-		serverVersion = parts[0]
-		serverCommit = parts[1]
-	} else {
-		serverVersion = serverRaw
-	}
-
-	serverVersion = strings.TrimSpace(serverVersion)
-	serverCommit = strings.TrimSpace(serverCommit)
-
-	if serverVersion == "" {
-		return
-	}
-
-	// 🧠 ONLY VERSION COMPARE (commit ignored)
-	if serverVersion == AppVersion {
-		return
-	}
-
-	fmt.Printf(
-		"\x1b[33m⚠ Update ada nih men: %s (%s). Starting auto-update...\x1b[0m\n",
-		serverVersion,
-		serverCommit,
-	)
-
-	execPath, err := os.Executable()
-	if err != nil {
-		return
-	}
-
-	tmpPath := execPath + ".new"
-
-	respBin, err := http.Get(BinaryURL)
-	if err != nil {
-		fmt.Println("\x1b[31m✘ Wadaw gagal download update binary\x1b[0m")
-		time.Sleep(1 * time.Second)
-		return
-	}
-	defer respBin.Body.Close()
-
-	out, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
-	if err != nil {
-		return
-	}
-
-	_, err = io.Copy(out, respBin.Body)
-	out.Close()
-
-	if err != nil {
-		os.Remove(tmpPath)
-		fmt.Println("\x1b[31m✘ Wadaw gagal write update binary\x1b[0m")
-		return
-	}
-
-	// 🧠 atomic replace
-	err = os.Rename(tmpPath, execPath)
-	if err != nil {
-		fmt.Println("\x1b[31m✘ Wadaw gagal replace binary\x1b[0m")
-		return
-	}
-
-	// 🧠 write lock to prevent immediate re-run after shell reload
-	_ = os.WriteFile(lockFile, []byte("1"), 0644)
-
-	fmt.Println("\x1b[32m✔ Binary updated done\x1b[0m")
-
-	// sync scripts
-	distDir := filepath.Join(os.Getenv("HOME"), "gasak-dist")
-	_ = os.MkdirAll(distDir, 0755)
-
-	scripts := []string{
-		"deploy_parkee.py",
-		"settlement_rfs.py",
-		"decode_and_merge.py",
-		"log_cleaner.py",
-		"install.sh",
-	}
-
-	baseURL := "http://10.70.0.110:9001"
-	hostname, _ := os.Hostname()
-
-	httpClient := &http.Client{Timeout: 15 * time.Second}
-
-	for _, s := range scripts {
-		url := baseURL + "/" + s
-		dest := filepath.Join(distDir, s)
-
-		req, err := http.NewRequest("GET", url, nil)
+		execPath, err := os.Executable()
 		if err != nil {
-			continue
+			return
 		}
 
-		req.Header.Set("X-Gasak-Host", hostname)
-
-		resp, err := httpClient.Do(req)
+		respBin, err := http.Get(BinaryURL)
 		if err != nil {
-			continue
+			fmt.Println("\x1b[31m✘ Ini gagal men, help senggol Fadlan dah\x1b[0m")
+			time.Sleep(1 * time.Second)
+			return
 		}
+		defer respBin.Body.Close()
 
-		f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+		os.Remove(execPath)
+
+		out, err := os.OpenFile(execPath, os.O_CREATE|os.O_WRONLY, 0755)
 		if err != nil {
-			resp.Body.Close()
-			continue
+			return
 		}
+		defer out.Close()
 
-		_, err = io.Copy(f, resp.Body)
-		f.Close()
-		resp.Body.Close()
-
+		_, err = io.Copy(out, respBin.Body)
 		if err == nil {
-			fmt.Printf("\x1b[32m✔ %s updated\x1b[0m\n", s)
+			fmt.Println("\x1b[32m✔ Binary update, wait syncing script terbaru men...\x1b[0m")
+
+			distDir := filepath.Join(os.Getenv("HOME"), "gasak-dist")
+			scripts := []string{
+				"deploy_parkee.py",
+				"settlement_rfs.py",
+				"decode_and_merge.py",
+				"log_cleaner.py",
+				"install.sh",
+			}
+
+			baseURL := "http://10.70.0.110:9001"
+			hostname, _ := os.Hostname()
+
+			for _, s := range scripts {
+				url := baseURL + "/" + s
+				dest := filepath.Join(distDir, s)
+
+				req, err := http.NewRequest("GET", url, nil)
+				if err != nil {
+					continue
+				}
+				req.Header.Set("X-Gasak-Host", hostname)
+
+				client := &http.Client{Timeout: 15 * time.Second}
+				resp, err := client.Do(req)
+				if err != nil {
+					continue
+				}
+
+				f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+				if err != nil {
+					resp.Body.Close()
+					continue
+				}
+
+				io.Copy(f, resp.Body)
+				f.Close()
+				resp.Body.Close()
+
+				fmt.Printf("\x1b[32m✔ %s updated\x1b[0m\n", s)
+			}
+
+			fmt.Println("\x1b[32m✔ DONE! GASAK udah berhasil di-update ke versi latest! Jalan lupa source zsh atau bash terus ketik gasak lagi men\x1b[0m")
+			os.Exit(0)
 		}
 	}
-
-	fmt.Println("\x1b[32m✔ UPDATE DONE MEN — restart shell atau jalankan gasak lagi\x1b[0m")
-	os.Exit(0)
 }
 
 func main() {
@@ -769,7 +705,6 @@ func runParkeeLauncher() {
 		return
 	}
 
-	// Validate credentials before calling script (consistent with settlement_rfs pattern)
 	if os.Getenv("PARKEE_SSH_USER") == "" || os.Getenv("PARKEE_SSH_PASS") == "" {
 		logErr("SSH credentials belum di-set di .env atau vault!")
 		logInfo("Tambahkan ke ~/.env atau ~/gasak-dist/.env:")
@@ -867,14 +802,38 @@ func executeSingleLocationMenu(selected *Location) {
 	for {
 		clearScreen()
 		showMiniHeader()
-		fmt.Println(accentStyle.Render("  Detail Lokasi Terpilih:"))
-		info := fmt.Sprintf(
-			"  %s : %s\n  %s   : %s\n  %s  : %s",
-			accentStyle.Render("Unicode"), selected.Unicode,
-			titleStyle.Render("Nama"), selected.Nama,
-			infoStyle.Render("IP ZT"), selected.IP,
-		)
-		fmt.Println(borderStyle.Render(info))
+
+		fmt.Println(accentStyle.Render("  Lokasi yang lu pilih:"))
+
+		agentVer, wsVer, fsVer := fetchLiveVersionsInlineSafe(selected.IP)
+
+		row := func(label string, value string, style lipgloss.Style) string {
+			labelWidth := 7
+			plainLabelWithColon := fmt.Sprintf("  %-*s : ", labelWidth, label)
+			return style.Render(plainLabelWithColon) + value
+		}
+
+		topSection := strings.Join([]string{
+			row("Unicode", selected.Unicode, accentStyle),
+			row("Nama", selected.Nama, titleStyle),
+			row("IP ZT", selected.IP, infoStyle),
+		}, "\n")
+
+		bottomSection := strings.Join([]string{
+			row("Agent", agentVer, titleStyle),
+			row("Ws", wsVer, infoStyle),
+			row("Fs", fsVer, accentStyle),
+		}, "\n")
+
+		content := strings.Join([]string{
+			topSection,
+			dimStyle.Render("  " + strings.Repeat("─", 45)),
+			bottomSection,
+		}, "\n")
+
+		box := borderStyle.Render(content)
+
+		fmt.Println(box)
 		fmt.Println()
 
 		var subAction string
@@ -884,7 +843,6 @@ func executeSingleLocationMenu(selected *Location) {
 					Title("Gas check versi men:").
 					Options(
 						huh.NewOption("SSH ke Lokasi", "ssh_to"),
-						huh.NewOption("Check Live Version (Agent, WS, FS)", "check_ver"),
 						huh.NewOption("Exit", "back"),
 					).
 					Value(&subAction),
@@ -900,17 +858,18 @@ func executeSingleLocationMenu(selected *Location) {
 			logInfo(fmt.Sprintf("SSH as support@%s ...", selected.IP))
 			fmt.Println()
 
-			// Langsung pakai SshPass global yang sudah di-load saat aplikasi start
-			runInteractive("sshpass", "-p", SshPass, "ssh",
-				"-o", "StrictHostKeyChecking=no",
-				"-o", "ConnectTimeout=5",
-				fmt.Sprintf("support@%s", selected.IP))
-			fmt.Println("\n[enter] balik ke menu detail...")
-			fmt.Scanln()
+			runInteractive(
+				"sshpass",
+				"-p",
+				SshPass,
+				"ssh",
+				"-o",
+				"StrictHostKeyChecking=no",
+				"-o",
+				"ConnectTimeout=5",
+				fmt.Sprintf("support@%s", selected.IP),
+			)
 
-		case "check_ver":
-			fmt.Println(accentStyle.Render("\n=== CHECKING LIVE VERSION (DIRECT) ==="))
-			fetchLiveVersionsInlineSafe(selected.IP)
 			fmt.Println("\n[enter] balik ke menu detail...")
 			fmt.Scanln()
 		}
@@ -919,11 +878,12 @@ func executeSingleLocationMenu(selected *Location) {
 
 func runMassCheckSafe(locs []Location) {
 	var unicodesInput string
+
 	form := huh.NewForm(
 		huh.NewGroup(
 			huh.NewInput().
-				Title("Masukkan List Unicode (pisahkan pake spasi, contoh: 016 012 014):").
-				Placeholder("016 012 014 015").
+				Title("Ketik aja unicode nya men (pisahin pake spasi, contoh: 0eu 0pv 17l):").
+				Placeholder("0eu 0pv 17l 19p").
 				Value(&unicodesInput),
 		),
 	).WithTheme(crushTheme())
@@ -933,111 +893,178 @@ func runMassCheckSafe(locs []Location) {
 	}
 
 	targets := strings.Fields(strings.ToLower(unicodesInput))
-	if len(targets) == 0 {
-		logWarn("Kaga ada unicode yang lu input men.")
-		return
-	}
 
 	clearScreen()
-	fmt.Println(accentStyle.Render("=== PARKEE MASS VERSION CHECKER (DIRECT FETCH) ==="))
-	fmt.Println(dimStyle.Render("Concurrent Agent, WS, & FS Extraction Engine"))
+	fmt.Println(accentStyle.Render("=== BULK LOC VERSION CHECKER ==="))
+	fmt.Println(dimStyle.Render("Check Agent, WS, & FS Blasting"))
 	fmt.Println()
+
+	rowMass := func(label string, value string, style lipgloss.Style) string {
+		labelWidth := 7
+		plainLabelWithColon := fmt.Sprintf("  %-*s : ", labelWidth, label)
+		return style.Render(plainLabelWithColon) + value
+	}
 
 	for _, target := range targets {
 		var foundLoc *Location
 		for _, l := range locs {
-			if strings.ToLower(l.Unicode) == target {
+			if strings.EqualFold(l.Unicode, target) {
 				loc := l
 				foundLoc = &loc
 				break
 			}
 		}
 
-		fmt.Println(accentStyle.Render(fmt.Sprintf("=== %s ===", strings.ToUpper(target))))
+		fmt.Println(dimStyle.Render(strings.Repeat("─", 55)))
+
 		if foundLoc == nil {
-			logErr(fmt.Sprintf("Unicode %s kagak ada di data Google Sheet", target))
-			fmt.Println()
+			fmt.Printf("🔴 Unicode [%s] -> ", strings.ToUpper(target))
+			logErr("Kagak ada di data Google Sheet")
 			continue
 		}
 
-		fmt.Printf("Location: %s\n", foundLoc.Nama)
-		fmt.Printf("IP-Zerotier=%s\n", foundLoc.IP)
+		fmt.Printf(
+			"🟢 %s (%s) — %s\n",
+			accentStyle.Render(strings.ToUpper(target)),
+			titleStyle.Render(foundLoc.Nama),
+			dimStyle.Render(foundLoc.IP),
+		)
 
-		fetchLiveVersionsInlineSafe(foundLoc.IP)
+		agent, ws, fs := fetchLiveVersionsInlineSafe(foundLoc.IP)
+
+		fmt.Println(rowMass("Agent", agent, titleStyle))
+		fmt.Println(rowMass("Ws", ws, infoStyle))
+		fmt.Println(rowMass("Fs", fs, accentStyle))
 		fmt.Println()
 	}
+
+	fmt.Println(dimStyle.Render(strings.Repeat("─", 55)))
+	fmt.Println("\n[enter] balik ke menu utama...")
+	fmt.Scanln()
 }
 
-func fetchLiveVersionsInlineSafe(ip string) {
+func fetchLiveVersionsInlineSafe(ip string) (string, string, string) {
+
 	type inlineRes struct {
 		label string
 		ver   string
 	}
+
 	ch := make(chan inlineRes, 3)
 
-	checkAPI := func(label, url string) {
-		client := http.Client{Timeout: 3 * time.Second}
+	checkAPI := func(label string, url string) {
+
+		client := http.Client{
+			Timeout: 3 * time.Second,
+		}
+
 		resp, err := client.Get(url)
+
 		if err != nil {
 			ch <- inlineRes{label, "-"}
 			return
 		}
+
 		defer resp.Body.Close()
-		var d map[string]interface{}
-		if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
+
+		var data map[string]interface{}
+
+		if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 			ch <- inlineRes{label, "-"}
 			return
 		}
-		b, _ := d["build"].(map[string]interface{})
-		v, _ := b["version"].(string)
-		if v == "" {
-			v = "-"
+
+		build, ok := data["build"].(map[string]interface{})
+
+		if !ok {
+			ch <- inlineRes{label, "-"}
+			return
 		}
-		ch <- inlineRes{label, v}
+
+		version, ok := build["version"].(string)
+
+		if !ok || version == "" {
+			version = "-"
+		}
+
+		ch <- inlineRes{
+			label,
+			version,
+		}
 	}
 
-	go checkAPI("WS", fmt.Sprintf("http://%s:9005/actuator/info", ip))
-	go checkAPI("FS", fmt.Sprintf("http://%s:8888/actuator/info", ip))
+	go checkAPI(
+		"WS",
+		fmt.Sprintf(
+			"http://%s:9005/actuator/info",
+			ip,
+		),
+	)
+
+	go checkAPI(
+		"FS",
+		fmt.Sprintf(
+			"http://%s:8888/actuator/info",
+			ip,
+		),
+	)
 
 	go func() {
-		cmd := exec.Command("sshpass", "-p", SshPass,
-			"ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=3",
+
+		cmd := exec.Command(
+			"sshpass",
+			"-p",
+			SshPass,
+			"ssh",
+			"-o",
+			"StrictHostKeyChecking=no",
+			"-o",
+			"ConnectTimeout=3",
 			"support@"+ip,
-			"unzip -p /mnt/shared/production/parkee-agent-production.jar META-INF/MANIFEST.MF 2>/dev/null | grep 'Implementation-Version' | cut -d: -f2 | tr -d ' \\r '",
+			"unzip -p /mnt/shared/production/parkee-agent-production.jar META-INF/MANIFEST.MF 2>/dev/null | grep Implementation-Version | cut -d: -f2 | tr -d ' \\r'",
 		)
+
 		out, err := cmd.Output()
-		v := strings.TrimSpace(string(out))
-		if err != nil || v == "" {
-			v = "-"
+
+		version := strings.TrimSpace(string(out))
+
+		if err != nil || version == "" {
+			version = "-"
 		}
-		ch <- inlineRes{"Agent", v}
+
+		ch <- inlineRes{
+			"Agent",
+			version,
+		}
+
 	}()
 
-	res := map[string]string{"Agent": "-", "WS": "-", "FS": "-"}
+	result := map[string]string{
+		"Agent": "-",
+		"WS":    "-",
+		"FS":    "-",
+	}
+
 	for i := 0; i < 3; i++ {
+
 		r := <-ch
-		res[r.label] = r.ver
+
+		result[r.label] = r.ver
+
 	}
 
-	cleanAgent := strings.TrimPrefix(strings.TrimSpace(res["Agent"]), "v")
-	cleanWS := strings.TrimPrefix(strings.TrimSpace(res["WS"]), "v")
-	cleanFS := strings.TrimPrefix(strings.TrimSpace(res["FS"]), "v")
+	format := func(v string) string {
 
-	if cleanAgent != "-" {
-		fmt.Printf("Agent=v%s\n", cleanAgent)
-	} else {
-		fmt.Println("Agent=-")
+		if v == "-" || v == "" {
+			return "-"
+		}
+
+		return "v" + strings.TrimPrefix(v, "v")
 	}
-	if cleanWS != "-" {
-		fmt.Printf("WS=v%s\n", cleanWS)
-	} else {
-		fmt.Println("WS=-")
-	}
-	if cleanFS != "-" {
-		fmt.Printf("FS=v%s\n", cleanFS)
-	} else {
-		fmt.Println("FS=-")
-	}
+
+	return format(result["Agent"]),
+		format(result["WS"]),
+		format(result["FS"])
 }
 
 type OutlineDocument struct {
