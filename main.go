@@ -418,6 +418,13 @@ func max3(a, b, c int) int {
 }
 
 func checkAndRunUpdate() {
+	// 🧠 prevent re-entry loop after update
+	lockFile := filepath.Join(os.TempDir(), "gasak_update_lock")
+	if _, err := os.Stat(lockFile); err == nil {
+		os.Remove(lockFile)
+		return
+	}
+
 	client := http.Client{Timeout: 2 * time.Second}
 
 	resp, err := client.Get(UpdateURL)
@@ -431,21 +438,33 @@ func checkAndRunUpdate() {
 		return
 	}
 
-	// FORMAT: "1.2.1|c72ba44"
 	serverRaw := strings.TrimSpace(string(raw))
-	parts := strings.Split(serverRaw, "|")
 
-	if len(parts) == 0 || parts[0] == "" {
+	// 🧠 normalize format (support | or - or plain)
+	var serverVersion, serverCommit string
+
+	if strings.Contains(serverRaw, "|") {
+		parts := strings.SplitN(serverRaw, "|", 2)
+		serverVersion = parts[0]
+		if len(parts) > 1 {
+			serverCommit = parts[1]
+		}
+	} else if strings.Contains(serverRaw, "-") {
+		parts := strings.SplitN(serverRaw, "-", 2)
+		serverVersion = parts[0]
+		serverCommit = parts[1]
+	} else {
+		serverVersion = serverRaw
+	}
+
+	serverVersion = strings.TrimSpace(serverVersion)
+	serverCommit = strings.TrimSpace(serverCommit)
+
+	if serverVersion == "" {
 		return
 	}
 
-	serverVersion := parts[0]
-	serverCommit := ""
-	if len(parts) > 1 {
-		serverCommit = parts[1]
-	}
-
-	// only compare VERSION, not commit
+	// 🧠 ONLY VERSION COMPARE (commit ignored)
 	if serverVersion == AppVersion {
 		return
 	}
@@ -461,7 +480,6 @@ func checkAndRunUpdate() {
 		return
 	}
 
-	// safer download target (avoid corrupt binary)
 	tmpPath := execPath + ".new"
 
 	respBin, err := http.Get(BinaryURL)
@@ -486,12 +504,15 @@ func checkAndRunUpdate() {
 		return
 	}
 
-	// replace binary safely
+	// 🧠 atomic replace
 	err = os.Rename(tmpPath, execPath)
 	if err != nil {
-		fmt.Println("\x1b[31m✘ Wadaw gagal buat replace binary\x1b[0m")
+		fmt.Println("\x1b[31m✘ Wadaw gagal replace binary\x1b[0m")
 		return
 	}
+
+	// 🧠 write lock to prevent immediate re-run after shell reload
+	_ = os.WriteFile(lockFile, []byte("1"), 0644)
 
 	fmt.Println("\x1b[32m✔ Binary updated done\x1b[0m")
 
@@ -543,7 +564,7 @@ func checkAndRunUpdate() {
 		}
 	}
 
-	fmt.Println("\x1b[32m✔ UPDATE DONE MEN — source zsh / bash terus gasak again\x1b[0m")
+	fmt.Println("\x1b[32m✔ UPDATE DONE MEN — restart shell atau jalankan gasak lagi\x1b[0m")
 	os.Exit(0)
 }
 
