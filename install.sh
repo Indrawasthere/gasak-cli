@@ -77,14 +77,15 @@ for cmd in curl python3 pip3 openssl; do
     fi
 done
 
-# System libraries required for Python packages (psycopg2-binary compilation)
+# System libraries required for Python packages + toolchain deps
 echo -e "  ${DIM}Checking system libraries...${RESET}"
-for lib in build-essential libpq-dev; do
+for lib in build-essential libpq-dev fzf sshpass rsync; do
     if dpkg -l 2>/dev/null | grep -q "^ii  $lib"; then
         echo -e "  ${GREEN}✔${RESET}  Library '${lib}' ready"
     else
         echo -e "  ${YELLOW}!${RESET}  Library '${lib}' not found, installing..."
-        sudo apt update && sudo apt install -y "$lib"
+        sudo apt update -qq && sudo apt install -y "$lib" 2>/dev/null || \
+            echo -e "  ${RED}✘${RESET}  Failed to install '${lib}' — install manual: sudo apt install ${lib}"
     fi
 done
 

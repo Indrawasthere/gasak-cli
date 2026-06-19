@@ -633,8 +633,8 @@ def update_properties(ip: str, unicode_code: str) -> bool:
         "fisherman.host": ip,
         "db": f"agent_{unicode_code}",
         "username": "agent",
-        "password": f"{unicode_code}545115",
-        "credential.information": "",  # ini kosong kan buat lokal yak? bener ga gue akwakwka
+        "password": f"{unicode_code}{os.environ.get('AGENT_DB_SUFFIX', '')}",
+        "credential.information": "",
     }
 
     props_path = Path(SERVER_PROPS)
@@ -647,7 +647,7 @@ def update_properties(ip: str, unicode_code: str) -> bool:
         err("Pastiin pull_remote_properties berhasil sebelum update_properties")
         return False
 
-    # Build old config map untuk display diff
+    # Build old config map buat display diff
     old_values: dict[str, str] = {}
     config_dict = _parse_properties(props_path)
     for k in updates:
@@ -957,7 +957,13 @@ def deploy(ip: str, unicode_code: str, nama: str) -> bool:
     if not wait_startup_log(log_file):
         err("Agent startup failed")
         return False
-
+    try:
+        props_path = Path(SERVER_PROPS)
+        if props_path.exists():
+            props_path.write_text("")
+            props_path.unlink()
+    except Exception:
+        pass
     return True
 
 

@@ -28,3 +28,7 @@ temp/
 *.dll
 *.so
 *.dylib
+gasak
+
+# Backup
+main-backup.go

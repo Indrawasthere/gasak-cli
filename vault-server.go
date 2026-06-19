@@ -38,6 +38,7 @@ type SecretPayload struct {
 	CmsDbName       string `json:"CMS_DB_NAME"`
 	GsheetDeployId  string `json:"GSHEET_DEPLOY_ID"`
 	GsheetDeployGid string `json:"GSHEET_DEPLOY_GID"`
+	AgentDbSuffix   string `json:"AGENT_DB_SUFFIX"`
 }
 
 type ClientRequest struct {
@@ -112,6 +113,7 @@ func handleGetEnv(w http.ResponseWriter, r *http.Request) {
 		CmsDbName:       os.Getenv("CMS_DB_NAME"),
 		GsheetDeployId:  os.Getenv("GSHEET_DEPLOY_ID"),
 		GsheetDeployGid: os.Getenv("GSHEET_DEPLOY_GID"),
+		AgentDbSuffix:   os.Getenv("AGENT_DB_SUFFIX"),
 	}
 
 	plaintext, err := json.Marshal(secrets)

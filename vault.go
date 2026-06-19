@@ -42,6 +42,7 @@ type VaultSecrets struct {
 	CmsDbName       string `json:"CMS_DB_NAME"`
 	GsheetDeployId  string `json:"GSHEET_DEPLOY_ID"`
 	GsheetDeployGid string `json:"GSHEET_DEPLOY_GID"`
+	AgentDbSuffix   string `json:"AGENT_DB_SUFFIX"`
 }
 
 func loadVault() (*VaultSecrets, error) {

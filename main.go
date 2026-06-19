@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -22,7 +23,7 @@ import (
 )
 
 const (
-	AppVersion = "1.1.25"
+	AppVersion = "1.2.0"
 )
 
 var (
@@ -37,11 +38,12 @@ var (
 	LinearAPIKey  string
 	SshPass       string
 
-	CmsDbHost string
-	CmsDbPort string
-	CmsDbUser string
-	CmsDbPass string
-	CmsDbName string
+	CmsDbHost     string
+	CmsDbPort     string
+	CmsDbUser     string
+	CmsDbPass     string
+	CmsDbName     string
+	AgentDbSuffix string
 )
 
 type LocateResponse struct {
@@ -121,6 +123,7 @@ func init() {
 	if CmsDbPort == "" {
 		CmsDbPort = "5432"
 	}
+	AgentDbSuffix = os.Getenv("AGENT_DB_SUFFIX")
 }
 
 const UpdateURL = "http://10.70.0.110:9001/version.txt"
@@ -436,7 +439,7 @@ func checkAndRunUpdate() {
 
 		respBin, err := http.Get(BinaryURL)
 		if err != nil {
-			fmt.Println("\x1b[31m✘ Gagal mendownload update.\x1b[0m")
+			fmt.Println("\x1b[31m✘ Ini gagal men, help senggol Fadlan dah\x1b[0m")
 			time.Sleep(1 * time.Second)
 			return
 		}
@@ -452,7 +455,50 @@ func checkAndRunUpdate() {
 
 		_, err = io.Copy(out, respBin.Body)
 		if err == nil {
-			fmt.Println("\x1b[32m✔ GASAK berhasil di-update ke versi terbaru! Jalan lupa source zsh atau bash terus gasak lagi.\x1b[0m")
+			fmt.Println("\x1b[32m✔ Binary update, wait syncing script terbaru men...\x1b[0m")
+
+			distDir := filepath.Join(os.Getenv("HOME"), "gasak-dist")
+			scripts := []string{
+				"deploy_parkee.py",
+				"settlement_rfs.py",
+				"decode_and_merge.py",
+				"log_cleaner.py",
+				"install.sh",
+			}
+
+			baseURL := "http://10.70.0.110:9001"
+			hostname, _ := os.Hostname()
+
+			for _, s := range scripts {
+				url := baseURL + "/" + s
+				dest := filepath.Join(distDir, s)
+
+				req, err := http.NewRequest("GET", url, nil)
+				if err != nil {
+					continue
+				}
+				req.Header.Set("X-Gasak-Host", hostname)
+
+				client := &http.Client{Timeout: 15 * time.Second}
+				resp, err := client.Do(req)
+				if err != nil {
+					continue
+				}
+
+				f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+				if err != nil {
+					resp.Body.Close()
+					continue
+				}
+
+				io.Copy(f, resp.Body)
+				f.Close()
+				resp.Body.Close()
+
+				fmt.Printf("\x1b[32m✔ %s updated\x1b[0m\n", s)
+			}
+
+			fmt.Println("\x1b[32m✔ DONE! GASAK udah berhasil di-update ke versi latest! Jalan lupa source zsh atau bash terus ketik gasak lagi men\x1b[0m")
 			os.Exit(0)
 		}
 	}
@@ -1614,8 +1660,9 @@ func fetchLogFromDir(tpUser *TeleportUser, loc *Location, remoteDir string, logL
 
 	fmt.Println()
 
-	remotePath := remoteDir + "/" + selectedFile
-	scpFile(tpUser, loc, remotePath, selectedFile)
+	actualFile := strings.Fields(selectedFile)[0]
+	remotePath := remoteDir + "/" + actualFile
+	scpFile(tpUser, loc, remotePath, actualFile)
 }
 
 func fetchSingleFile(tpUser *TeleportUser, loc *Location, remotePath string, logLabel string) {
@@ -1627,7 +1674,7 @@ func fetchSingleFile(tpUser *TeleportUser, loc *Location, remotePath string, log
 }
 
 func listRemoteDir(tpUser *TeleportUser, loc *Location, remoteDir string) ([]string, error) {
-	lsCmd := fmt.Sprintf("cd %s && ls -1t 2>/dev/null | head -50", remoteDir)
+	lsCmd := fmt.Sprintf("cd %s && ls -lhtr 2>/dev/null | tail -50", remoteDir)
 
 	var out []byte
 	var err error
@@ -1663,9 +1710,18 @@ func listRemoteDir(tpUser *TeleportUser, loc *Location, remoteDir string) ([]str
 	var files []string
 	for _, l := range lines {
 		l = strings.TrimSpace(l)
-		if l != "" {
-			files = append(files, l)
+		if l == "" || strings.HasPrefix(l, "total") {
+			continue
 		}
+		fields := strings.Fields(l)
+		if len(fields) < 9 {
+			continue
+		}
+		filename := strings.Join(fields[8:], " ")
+		size := fields[4]
+		date := strings.Join(fields[5:8], " ")
+		display := fmt.Sprintf("%-40s  %6s  %s", filename, size, date)
+		files = append(files, display)
 	}
 
 	return files, nil
@@ -1678,6 +1734,39 @@ func scpFile(tpUser *TeleportUser, loc *Location, remotePath string, filename st
 		return
 	}
 	destPath := filepath.Join(destDir, filename)
+
+	// Auto compress .log yang belum gz sebelum SCP
+	if strings.HasSuffix(remotePath, ".log") {
+		logInfo("File .log terdeteksi — auto compressing dulu di server...")
+		gzPath := remotePath + ".gz"
+		gzFilename := filename + ".gz"
+
+		var compressCmd *exec.Cmd
+		compressArgs := fmt.Sprintf("gzip -c %s > %s", remotePath, gzPath)
+
+		if tpUser.IsL2 {
+			nodeName := nodeNameFromUnicode(loc.Unicode)
+			compressCmd = exec.Command("tsh", "ssh",
+				fmt.Sprintf("%s@%s", nodeName, nodeName),
+				compressArgs,
+			)
+		} else {
+			compressCmd = exec.Command("sshpass", "-p", SshPass,
+				"ssh", "-o", "StrictHostKeyChecking=no",
+				fmt.Sprintf("support@%s", loc.IP),
+				compressArgs,
+			)
+		}
+
+		if err := compressCmd.Run(); err != nil {
+			logWarn("Gagal compress, lanjut download file asli...")
+		} else {
+			logOK("Compressed ke .gz — download versi compressed")
+			remotePath = gzPath
+			filename = gzFilename
+			destPath = filepath.Join(destDir, gzFilename)
+		}
+	}
 
 	logInfo(fmt.Sprintf("Memulai download file remote: %s", remotePath))
 	logInfo(fmt.Sprintf("Disimpan ke lokal: %s", destPath))
@@ -1738,7 +1827,7 @@ func queryGatesViaTeleport(tpUser *TeleportUser, loc *Location) ([]GateInfo, err
 		unicode,
 	)
 
-	pgPass := fmt.Sprintf("%s545115", unicode)
+	pgPass := fmt.Sprintf("%s%s", unicode, AgentDbSuffix)
 	cmdStr := fmt.Sprintf(
 		`PGPASSWORD='%s' psql -h localhost -d %s -U agent -At -F '|' -c "%s"`,
 		pgPass,
@@ -1770,7 +1859,7 @@ func queryGatesViaSSH(loc *Location) ([]GateInfo, error) {
 		unicode,
 	)
 
-	pgPass := fmt.Sprintf("%s545115", unicode)
+	pgPass := fmt.Sprintf("%s%s", unicode, AgentDbSuffix)
 	psqlCmd := fmt.Sprintf(
 		`PGPASSWORD='%s' psql -h localhost -d %s -U agent -At -F '|' -c "%s"`,
 		pgPass,
@@ -1810,9 +1899,39 @@ func parseGateOutput(output string) ([]GateInfo, error) {
 			continue
 		}
 
+		userPC := strings.TrimSpace(parts[0])
+		rawIP := strings.TrimSpace(parts[1])
+
+		ip := ""
+		for _, candidate := range strings.Fields(rawIP) {
+			candidate = strings.TrimSpace(candidate)
+			if strings.HasPrefix(candidate, "10.70.") ||
+				strings.HasPrefix(candidate, "111.") ||
+				strings.HasPrefix(candidate, "103.") {
+				ip = candidate
+				break
+			}
+		}
+
+		if ip == "" {
+			for _, candidate := range strings.Fields(rawIP) {
+				candidate = strings.TrimSpace(candidate)
+				if !strings.HasPrefix(candidate, "192.168.") &&
+					!strings.HasPrefix(candidate, "172.") &&
+					net.ParseIP(candidate) != nil {
+					ip = candidate
+					break
+				}
+			}
+		}
+
+		if ip == "" {
+			continue
+		}
+
 		gates = append(gates, GateInfo{
-			UserPC: strings.TrimSpace(parts[0]),
-			IP:     strings.TrimSpace(parts[1]),
+			UserPC: userPC,
+			IP:     ip,
 		})
 	}
 
@@ -1827,7 +1946,7 @@ func listGateLogFiles(tpUser *TeleportUser, loc *Location, gate GateInfo, remote
 	gatePass := fmt.Sprintf("pc%sclient", strings.ToLower(loc.Unicode))
 
 	lsCmd := fmt.Sprintf(
-		"sshpass -p '%s' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 %s@%s 'ls -1t %s 2>/dev/null | head -30'",
+		"sshpass -p '%s' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 %s@%s 'ls -lhtr %s 2>/dev/null | tail -30'",
 		gatePass, gate.UserPC, gate.IP, remotePath,
 	)
 
@@ -1864,9 +1983,18 @@ func listGateLogFiles(tpUser *TeleportUser, loc *Location, gate GateInfo, remote
 	var files []string
 	for _, l := range strings.Split(raw, "\n") {
 		l = strings.TrimSpace(l)
-		if l != "" {
-			files = append(files, l)
+		if l == "" || strings.HasPrefix(l, "total") {
+			continue
 		}
+		fields := strings.Fields(l)
+		if len(fields) < 9 {
+			continue
+		}
+		filename := strings.Join(fields[8:], " ")
+		size := fields[4]
+		date := strings.Join(fields[5:8], " ")
+		display := fmt.Sprintf("%-50s  %6s  %s", filename, size, date)
+		files = append(files, display)
 	}
 	return files, nil
 }
@@ -1951,7 +2079,8 @@ func fetchAgentGateLog(tpUser *TeleportUser, loc *Location, remotePath string, l
 
 	fmt.Println()
 
-	scpGateFileViaServerPos(tpUser, loc, selectedGate, remotePath+"/"+selectedFile, selectedFile)
+	actualFile := strings.Fields(selectedFile)[0]
+	scpGateFileViaServerPos(tpUser, loc, selectedGate, remotePath+"/"+actualFile, actualFile)
 }
 
 func scpGateFileViaServerPos(tpUser *TeleportUser, loc *Location, gate GateInfo, remoteFilePath string, filename string) {
@@ -1969,42 +2098,99 @@ func scpGateFileViaServerPos(tpUser *TeleportUser, loc *Location, gate GateInfo,
 	fmt.Println(dimStyle.Render("  Ini mungkin butuh waktu ya men, tergantung ukuran file..."))
 	fmt.Println()
 
-	hop1Cmd := fmt.Sprintf(
-		"sshpass -p '%s' scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 %s@%s:%s %s",
-		gatePass, gate.UserPC, gate.IP, remoteFilePath, tmpPath,
-	)
+	// Auto compress .log sebelum hop
+	// Auto compress + hop1 — gzip di gate dulu, baru scp ke server main
+	if strings.HasSuffix(remoteFilePath, ".log") {
+		logInfo("Auto compressing .log di gate sebelum jump...")
+		gzRemote := "/tmp/" + filename + ".gz"
+		gzTmp := tmpPath + ".gz"
 
-	var hop1Err error
+		compressAndHop := fmt.Sprintf(
+			"sshpass -p '%s' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 %s@%s 'gzip -c %s > %s' && sshpass -p '%s' scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 %s@%s:%s %s",
+			gatePass, gate.UserPC, gate.IP, remoteFilePath, gzRemote,
+			gatePass, gate.UserPC, gate.IP, gzRemote, gzTmp,
+		)
 
-	if tpUser.IsL2 {
-		nodeName := nodeNameFromUnicode(loc.Unicode)
-		cmd := exec.Command("tsh", "ssh",
-			fmt.Sprintf("%s@%s", nodeName, nodeName),
-			hop1Cmd,
-		)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		hop1Err = cmd.Run()
-	} else {
-		cmd := exec.Command("sshpass", "-p", SshPass,
-			"ssh",
-			"-o", "StrictHostKeyChecking=no",
-			"-o", "ConnectTimeout=10",
-			fmt.Sprintf("support@%s", loc.IP),
-			hop1Cmd,
-		)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		hop1Err = cmd.Run()
+		var compressHopCmd *exec.Cmd
+		if tpUser.IsL2 {
+			nodeName := nodeNameFromUnicode(loc.Unicode)
+			compressHopCmd = exec.Command("tsh", "ssh",
+				fmt.Sprintf("%s@%s", nodeName, nodeName),
+				compressAndHop,
+			)
+		} else {
+			compressHopCmd = exec.Command("sshpass", "-p", SshPass,
+				"ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10",
+				fmt.Sprintf("support@%s", loc.IP),
+				compressAndHop,
+			)
+		}
+
+		compressHopCmd.Stdout = os.Stdout
+		compressHopCmd.Stderr = os.Stderr
+
+		if err := compressHopCmd.Run(); err != nil {
+			logWarn("Gagal compress + hop, fallback ke file asli...")
+		} else {
+			logOK("Compressed + hop1 selesai — lanjut hop2 dengan .gz")
+			remoteFilePath = gzRemote
+			tmpPath = gzTmp
+			filename = filename + ".gz"
+			destPath = filepath.Join(filepath.Dir(destPath), filename)
+
+			// Cleanup .gz di gate
+			cleanGzGate := fmt.Sprintf(
+				"sshpass -p '%s' ssh -o StrictHostKeyChecking=no %s@%s 'rm -f %s'",
+				gatePass, gate.UserPC, gate.IP, gzRemote,
+			)
+			if tpUser.IsL2 {
+				nodeName := nodeNameFromUnicode(loc.Unicode)
+				exec.Command("tsh", "ssh", fmt.Sprintf("%s@%s", nodeName, nodeName), cleanGzGate).Run()
+			} else {
+				exec.Command("sshpass", "-p", SshPass, "ssh", "-o", "StrictHostKeyChecking=no",
+					fmt.Sprintf("support@%s", loc.IP), cleanGzGate).Run()
+			}
+
+			goto hop2
+		}
 	}
 
-	if hop1Err != nil {
-		logErr(fmt.Sprintf("Jumping 1 gagal — SCP dari gate ke server main: %v", hop1Err))
-		logWarn("Kemungkinan: gate PC offline, credential salah, atau sshpass ga ada di server main.")
-		return
+	{
+		hop1Cmd := fmt.Sprintf(
+			"sshpass -p '%s' scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 %s@%s:%s %s",
+			gatePass, gate.UserPC, gate.IP, remoteFilePath, tmpPath,
+		)
+
+		var hop1Err error
+		if tpUser.IsL2 {
+			nodeName := nodeNameFromUnicode(loc.Unicode)
+			cmd := exec.Command("tsh", "ssh",
+				fmt.Sprintf("%s@%s", nodeName, nodeName),
+				hop1Cmd,
+			)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			hop1Err = cmd.Run()
+		} else {
+			cmd := exec.Command("sshpass", "-p", SshPass,
+				"ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10",
+				fmt.Sprintf("support@%s", loc.IP),
+				hop1Cmd,
+			)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			hop1Err = cmd.Run()
+		}
+
+		if hop1Err != nil {
+			logErr(fmt.Sprintf("Jumping 1 gagal: %v", hop1Err))
+			return
+		}
+
+		logOK(fmt.Sprintf("Oke Jumping 1 selesai — file ada di /tmp/%s di server main.", filename))
 	}
 
-	logOK(fmt.Sprintf("Oke Jumping 1 selesai — file ada di /tmp/%s di server main.", filename))
+hop2:
 	fmt.Println()
 	logInfo("Jumping 2/2 — Narik dari server main ke laptop...")
 	fmt.Println()
@@ -2129,4 +2315,5 @@ func applyVaultSecrets(s *VaultSecrets) {
 	os.Setenv("CMS_DB_NAME", s.CmsDbName)
 	os.Setenv("GSHEET_DEPLOY_ID", s.GsheetDeployId)
 	os.Setenv("GSHEET_DEPLOY_GID", s.GsheetDeployGid)
+	os.Setenv("AGENT_DB_SUFFIX", s.AgentDbSuffix)
 }
