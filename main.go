@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	AppVersion = "1.2.4"
+	AppVersion = "1.2.5"
 )
 
 var (
@@ -44,6 +44,10 @@ var (
 	CmsDbPass     string
 	CmsDbName     string
 	AgentDbSuffix string
+
+	PlocSpreadsheetID string
+	PlocServersGID    string
+	PlocZerotierGID   string
 )
 
 type LocateResponse struct {
@@ -52,26 +56,19 @@ type LocateResponse struct {
 }
 
 func init() {
-	// ── Priority 1: GASAK Vault (encrypted local vault) ──────────
-	// Ini path utama — secret dienkripsi pake Hybrid RSA-AES, gak ada plaintext di disk
 	vaultLoaded := false
 	if secrets, err := loadVault(); err == nil {
 		applyVaultSecrets(secrets)
 		vaultLoaded = true
 	} else {
-		// Analisis AI Internal Parkee: Supaya ga noise di local dev machine / fresh install,
-		// kita cek dulu apakah file vault-nya memang eksis di dalam path target.
 		vaultDir := filepath.Join(os.Getenv("HOME"), ".config/gasak")
 		vaultPath := filepath.Join(vaultDir, "vault")
 
 		if _, statErr := os.Stat(vaultPath); statErr == nil {
-			// File vault-nya ada, tapi kenapa gagal load? Berarti keypair RSA ga match / corrupt!
 			fmt.Fprintf(os.Stderr, "[VAULT] Gagal load vault: %v — fallback ke .env\n", err)
 		}
-		// Kalau file vault-nya emang gaada (Expected State saat develop / fresh install), silent aja men.
 	}
 
-	// ── Priority 2: .env fallback ─────────────────────────────────
 	if !vaultLoaded {
 		home, _ := os.UserHomeDir()
 		locations := []string{
@@ -94,13 +91,11 @@ func init() {
 		}
 	}
 
-	// ── Load ke global vars ───────────────────────────────────────
 	GLPIUrl = os.Getenv("GLPI_URL")
 	OutlineURL = os.Getenv("OUTLINE_URL")
 	OutlineAPIKey = os.Getenv("OUTLINE_API_KEY")
 	LinearAPIKey = os.Getenv("LINEAR_API_KEY")
 
-	// Support both naming conventions (GSHEET_DEPLOY_ID or SPREADSHEET_ID)
 	SpreadsheetID = os.Getenv("GSHEET_DEPLOY_ID")
 	if SpreadsheetID == "" {
 		SpreadsheetID = os.Getenv("SPREADSHEET_ID")
@@ -111,10 +106,8 @@ func init() {
 	}
 	csvURL = fmt.Sprintf("https://docs.google.com/spreadsheets/d/%s/export?format=csv&gid=%s", SpreadsheetID, SheetGID)
 
-	// Fallback password ssh support default PARKEE
 	SshPass = os.Getenv("PARKEE_SSH_PASS")
 
-	// Credential Database CMS Pusat untuk parsing di internal GASAK / script python
 	CmsDbHost = os.Getenv("CMS_DB_HOST")
 	CmsDbPort = os.Getenv("CMS_DB_PORT")
 	CmsDbUser = os.Getenv("CMS_DB_USER")
@@ -124,6 +117,9 @@ func init() {
 		CmsDbPort = "5432"
 	}
 	AgentDbSuffix = os.Getenv("AGENT_DB_SUFFIX")
+	PlocSpreadsheetID = os.Getenv("GSHEET_PLOC_ID")
+	PlocServersGID = os.Getenv("GSHEET_PLOC_SERVERS_GID")
+	PlocZerotierGID = os.Getenv("GSHEET_PLOC_ZEROTIER_GID")
 }
 
 const UpdateURL = "http://10.70.0.110:9001/version.txt"
@@ -752,9 +748,6 @@ func runLocationLookup() {
 	}
 
 	options := make([]huh.Option[string], 0, len(locs))
-
-	options = append(options, huh.NewOption("Location Lookup", "mass_check"))
-
 	for _, l := range locs {
 		label := fmt.Sprintf("%-8s | %-45s | %s", l.Unicode, truncate(l.Nama, 45), l.IP)
 		options = append(options, huh.NewOption(label, l.Unicode))
@@ -764,7 +757,7 @@ func runLocationLookup() {
 	form := huh.NewForm(
 		huh.NewGroup(
 			huh.NewSelect[string]().
-				Title("Pilih lewat dropdown atau ketik aja unicode/nama lokasi nya men):").
+				Title("Pilih lokasi yang mau di-lookup:").
 				Description(fmt.Sprintf("%d lokasi aktif ditemukan", len(locs))).
 				Options(options...).
 				Value(&selectedUnicode).
@@ -773,29 +766,71 @@ func runLocationLookup() {
 	).WithTheme(crushTheme())
 
 	if err := form.Run(); err != nil {
-		logWarn("Pencarian dibatalkan.")
+		logWarn("Lookup dibatalkan.")
 		return
 	}
 
-	if selectedUnicode == "mass_check" {
-		runMassCheckSafe(locs)
-		return
-	}
-
-	var selected *Location
+	var selectedLoc *Location
 	for _, l := range locs {
 		if l.Unicode == selectedUnicode {
 			loc := l
-			selected = &loc
+			selectedLoc = &loc
 			break
 		}
 	}
-	if selected == nil {
-		logErr("Lokasi gaada nich.")
+
+	if selectedLoc == nil {
+		logErr("Lokasi kagak ketemu men!")
 		return
 	}
 
-	executeSingleLocationMenu(selected)
+	logOK(fmt.Sprintf("Target: %s [%s]", selectedLoc.Nama, strings.ToUpper(selectedLoc.Unicode)))
+	fmt.Println()
+
+	tpUser := getTeleportUser()
+
+	if tpUser.IsL2 {
+		logInfo("Fetching via ploc, wait up men")
+		fmt.Println()
+		runInteractive("ssh", "parkee@10.70.0.110",
+			fmt.Sprintf("cd /home/parkee/gasak-dist && /usr/bin/python3 ploc_method.py %s -p", strings.ToLower(selectedLoc.Unicode)),
+		)
+		return
+	}
+
+	logInfo("Fetching lokasi via vault server...")
+	fmt.Println()
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	req, err := http.NewRequest("GET",
+		fmt.Sprintf("http://10.70.0.110:9002/api/ploc?keyword=%s", strings.ToLower(selectedLoc.Unicode)),
+		nil,
+	)
+	if err != nil {
+		logErr("Gagal bikin request: " + err.Error())
+		return
+	}
+	req.Header.Set("X-Gasak-Token", "gsk_dist_9f2k7x")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		logErr("Vault server ga bisa dihubungi: " + err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		logErr("Gagal baca response: " + err.Error())
+		return
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		logErr(fmt.Sprintf("Vault server error (%d): %s", resp.StatusCode, string(body)))
+		return
+	}
+
+	fmt.Println(string(body))
 }
 
 func executeSingleLocationMenu(selected *Location) {
@@ -2407,4 +2442,7 @@ func applyVaultSecrets(s *VaultSecrets) {
 	os.Setenv("GSHEET_DEPLOY_ID", s.GsheetDeployId)
 	os.Setenv("GSHEET_DEPLOY_GID", s.GsheetDeployGid)
 	os.Setenv("AGENT_DB_SUFFIX", s.AgentDbSuffix)
+	os.Setenv("GSHEET_PLOC_ID", s.GsheetPlocId)
+	os.Setenv("GSHEET_PLOC_SERVERS_GID", s.GsheetPlocSrvGid)
+	os.Setenv("GSHEET_PLOC_ZEROTIER_GID", s.GsheetPlocZtGid)
 }

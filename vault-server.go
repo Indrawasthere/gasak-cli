@@ -25,20 +25,23 @@ const (
 )
 
 type SecretPayload struct {
-	GLPIUrl         string `json:"GLPI_URL"`
-	OutlineURL      string `json:"OUTLINE_URL"`
-	OutlineAPIKey   string `json:"OUTLINE_API_KEY"`
-	LinearAPIKey    string `json:"LINEAR_API_KEY"`
-	SshUser         string `json:"PARKEE_SSH_USER"`
-	SshPass         string `json:"PARKEE_SSH_PASS"`
-	CmsDbHost       string `json:"CMS_DB_HOST"`
-	CmsDbPort       string `json:"CMS_DB_PORT"`
-	CmsDbUser       string `json:"CMS_DB_USER"`
-	CmsDbPass       string `json:"CMS_DB_PASS"`
-	CmsDbName       string `json:"CMS_DB_NAME"`
-	GsheetDeployId  string `json:"GSHEET_DEPLOY_ID"`
-	GsheetDeployGid string `json:"GSHEET_DEPLOY_GID"`
-	AgentDbSuffix   string `json:"AGENT_DB_SUFFIX"`
+	GLPIUrl          string `json:"GLPI_URL"`
+	OutlineURL       string `json:"OUTLINE_URL"`
+	OutlineAPIKey    string `json:"OUTLINE_API_KEY"`
+	LinearAPIKey     string `json:"LINEAR_API_KEY"`
+	SshUser          string `json:"PARKEE_SSH_USER"`
+	SshPass          string `json:"PARKEE_SSH_PASS"`
+	CmsDbHost        string `json:"CMS_DB_HOST"`
+	CmsDbPort        string `json:"CMS_DB_PORT"`
+	CmsDbUser        string `json:"CMS_DB_USER"`
+	CmsDbPass        string `json:"CMS_DB_PASS"`
+	CmsDbName        string `json:"CMS_DB_NAME"`
+	GsheetDeployId   string `json:"GSHEET_DEPLOY_ID"`
+	GsheetDeployGid  string `json:"GSHEET_DEPLOY_GID"`
+	AgentDbSuffix    string `json:"AGENT_DB_SUFFIX"`
+	GsheetPlocId     string `json:"GSHEET_PLOC_ID"`
+	GsheetPlocSrvGid string `json:"GSHEET_PLOC_SERVERS_GID"`
+	GsheetPlocZtGid  string `json:"GSHEET_PLOC_ZEROTIER_GID"`
 }
 
 type ClientRequest struct {
@@ -64,11 +67,44 @@ func main() {
 	http.HandleFunc("/getenv", handleGetEnv)
 	http.HandleFunc("/health", handleHealth)
 	http.HandleFunc("/api/locate-gate", handleLocateGate)
+	http.HandleFunc("/api/ploc", handlePloc)
 
 	err := http.ListenAndServe(fmt.Sprintf(":%d", VaultPort), nil)
 	if err != nil {
 		log.Fatalf("[FATAL] Gagal menjalankan server: %v", err)
 	}
+}
+
+func handlePloc(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+
+	token := r.Header.Get("X-Gasak-Token")
+	if token != "gsk_dist_9f2k7x" {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprintln(w, "Unauthorized")
+		return
+	}
+
+	keyword := strings.TrimSpace(r.URL.Query().Get("keyword"))
+	if keyword == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintln(w, "keyword kosong")
+		return
+	}
+
+	scriptPath := "/home/parkee/gasak-dist/ploc_method.py"
+	cmd := exec.Command("/usr/bin/python3", scriptPath, keyword, "-p")
+	cmd.Env = os.Environ()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, "ploc error: %v\n%s", err, string(output))
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(output)
+	logAccess(r, http.StatusOK, "ploc: "+keyword)
 }
 
 func handleGetEnv(w http.ResponseWriter, r *http.Request) {
@@ -100,20 +136,23 @@ func handleGetEnv(w http.ResponseWriter, r *http.Request) {
 	}
 
 	secrets := SecretPayload{
-		GLPIUrl:         os.Getenv("GLPI_URL"),
-		OutlineURL:      os.Getenv("OUTLINE_URL"),
-		OutlineAPIKey:   os.Getenv("OUTLINE_API_KEY"),
-		LinearAPIKey:    os.Getenv("LINEAR_API_KEY"),
-		SshUser:         os.Getenv("PARKEE_SSH_USER"),
-		SshPass:         os.Getenv("PARKEE_SSH_PASS"),
-		CmsDbHost:       os.Getenv("CMS_DB_HOST"),
-		CmsDbPort:       os.Getenv("CMS_DB_PORT"),
-		CmsDbUser:       os.Getenv("CMS_DB_USER"),
-		CmsDbPass:       os.Getenv("CMS_DB_PASS"),
-		CmsDbName:       os.Getenv("CMS_DB_NAME"),
-		GsheetDeployId:  os.Getenv("GSHEET_DEPLOY_ID"),
-		GsheetDeployGid: os.Getenv("GSHEET_DEPLOY_GID"),
-		AgentDbSuffix:   os.Getenv("AGENT_DB_SUFFIX"),
+		GLPIUrl:          os.Getenv("GLPI_URL"),
+		OutlineURL:       os.Getenv("OUTLINE_URL"),
+		OutlineAPIKey:    os.Getenv("OUTLINE_API_KEY"),
+		LinearAPIKey:     os.Getenv("LINEAR_API_KEY"),
+		SshUser:          os.Getenv("PARKEE_SSH_USER"),
+		SshPass:          os.Getenv("PARKEE_SSH_PASS"),
+		CmsDbHost:        os.Getenv("CMS_DB_HOST"),
+		CmsDbPort:        os.Getenv("CMS_DB_PORT"),
+		CmsDbUser:        os.Getenv("CMS_DB_USER"),
+		CmsDbPass:        os.Getenv("CMS_DB_PASS"),
+		CmsDbName:        os.Getenv("CMS_DB_NAME"),
+		GsheetDeployId:   os.Getenv("GSHEET_DEPLOY_ID"),
+		GsheetDeployGid:  os.Getenv("GSHEET_DEPLOY_GID"),
+		AgentDbSuffix:    os.Getenv("AGENT_DB_SUFFIX"),
+		GsheetPlocId:     os.Getenv("GSHEET_PLOC_ID"),
+		GsheetPlocSrvGid: os.Getenv("GSHEET_PLOC_SERVERS_GID"),
+		GsheetPlocZtGid:  os.Getenv("GSHEET_PLOC_ZEROTIER_GID"),
 	}
 
 	plaintext, err := json.Marshal(secrets)

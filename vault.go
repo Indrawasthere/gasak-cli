@@ -29,20 +29,23 @@ type VaultData struct {
 }
 
 type VaultSecrets struct {
-	GLPIUrl         string `json:"GLPI_URL"`
-	OutlineURL      string `json:"OUTLINE_URL"`
-	OutlineAPIKey   string `json:"OUTLINE_API_KEY"`
-	LinearAPIKey    string `json:"LINEAR_API_KEY"`
-	SshUser         string `json:"PARKEE_SSH_USER"`
-	SshPass         string `json:"PARKEE_SSH_PASS"`
-	CmsDbHost       string `json:"CMS_DB_HOST"`
-	CmsDbPort       string `json:"CMS_DB_PORT"`
-	CmsDbUser       string `json:"CMS_DB_USER"`
-	CmsDbPass       string `json:"CMS_DB_PASS"`
-	CmsDbName       string `json:"CMS_DB_NAME"`
-	GsheetDeployId  string `json:"GSHEET_DEPLOY_ID"`
-	GsheetDeployGid string `json:"GSHEET_DEPLOY_GID"`
-	AgentDbSuffix   string `json:"AGENT_DB_SUFFIX"`
+	GLPIUrl          string `json:"GLPI_URL"`
+	OutlineURL       string `json:"OUTLINE_URL"`
+	OutlineAPIKey    string `json:"OUTLINE_API_KEY"`
+	LinearAPIKey     string `json:"LINEAR_API_KEY"`
+	SshUser          string `json:"PARKEE_SSH_USER"`
+	SshPass          string `json:"PARKEE_SSH_PASS"`
+	CmsDbHost        string `json:"CMS_DB_HOST"`
+	CmsDbPort        string `json:"CMS_DB_PORT"`
+	CmsDbUser        string `json:"CMS_DB_USER"`
+	CmsDbPass        string `json:"CMS_DB_PASS"`
+	CmsDbName        string `json:"CMS_DB_NAME"`
+	GsheetDeployId   string `json:"GSHEET_DEPLOY_ID"`
+	GsheetDeployGid  string `json:"GSHEET_DEPLOY_GID"`
+	AgentDbSuffix    string `json:"AGENT_DB_SUFFIX"`
+	GsheetPlocId     string `json:"GSHEET_PLOC_ID"`
+	GsheetPlocSrvGid string `json:"GSHEET_PLOC_SERVERS_GID"`
+	GsheetPlocZtGid  string `json:"GSHEET_PLOC_ZEROTIER_GID"`
 }
 
 func loadVault() (*VaultSecrets, error) {
