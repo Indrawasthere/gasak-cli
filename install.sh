@@ -139,6 +139,19 @@ for file in "${COMPONENTS[@]}"; do
     fi
 done
 
+# ─── DOWNLOAD SERVER.PROPERTIES TEMPLATE ──────────────────────
+AGENT_DIR="/opt/app/agent/parkee-agent"
+echo -e "\n${BOLD}Downloading server.properties template...${RESET}"
+sudo mkdir -p "$AGENT_DIR"
+if curl -fsSL \
+    -H "X-Gasak-Host: ${DEVICE_HOST}" \
+    "${BASE_URL}/server.properties" -o "${AGENT_DIR}/server.properties"; then
+    echo -e "  ${GREEN}✔${RESET}  server.properties downloaded to ${AGENT_DIR}"
+    sudo chown -R "${REAL_USER}:${REAL_USER}" "$AGENT_DIR"
+else
+    echo -e "  ${YELLOW}!${RESET}  Failed to download server.properties (will be pulled from remote during deployment)"
+fi
+
 if [ ! -f "$ENV_PATH" ]; then
     echo -e "  ${DIM}Initializing default configuration space...${RESET}"
     cat << 'EOF' > "$ENV_PATH"

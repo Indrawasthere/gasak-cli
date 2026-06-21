@@ -10,6 +10,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -20,6 +21,7 @@ from iterfzf import iterfzf
 from questionary import Style as QStyle
 from rich.align import Align
 from rich.console import Console
+from rich.live import Live
 from rich.panel import Panel
 from rich.prompt import Confirm
 from rich.rule import Rule
@@ -58,6 +60,8 @@ SERVER_PROPS = f"{APP_DIR}/server.properties"
 JAVA_BIN = "/usr/lib/jvm/bellsoft-java15-full-amd64/bin/java"
 JAR_NAME = "parkee-agent-production.jar"
 AGENT_JAR_PATH = "/mnt/shared/production/parkee-agent-production.jar"
+
+REMOTE_PROPS_PATH = f"{APP_DIR}/server.properties"
 
 FILES_TO_SYNC = [
     "/mnt/shared/production/parkee-agent-production.jar",
@@ -521,6 +525,57 @@ def sync_files(ip: str) -> bool:
 # ─────────────────────────────────────────────────────────────
 
 
+def pull_remote_properties(ip: str) -> bool:
+    """
+    Pull server.properties dari remote via SSH → simpan ke local SERVER_PROPS.
+    Ini jadi base config — semua key lokasi-spesifik (port, ftp, minio, qiqo, dll)
+    langsung dari source of truth remote, bukan hardcoded.
+    """
+    console.print(f"\n[bold {PINK}]  Pull server.properties from Remote[/]")
+    console.print(Rule(style=GREY))
+
+    props_path = Path(SERVER_PROPS)
+    props_path.parent.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        "sshpass",
+        "-p",
+        SSH_PASS,
+        "scp",
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        "LogLevel=ERROR",
+        "-o",
+        f"ConnectTimeout={SSH_TIMEOUT}",
+        f"{SSH_USER}@{ip}:{REMOTE_PROPS_PATH}",
+        str(props_path),
+    ]
+
+    with console.status("[cyan]Pulling server.properties...[/]", spinner="dots"):
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
+    if result.returncode != 0:
+        err(f"Failed to pull server.properties from {ip}")
+        err(f"SCP error: {result.stderr.strip()}")
+        if props_path.exists():
+            warn("Using existing local server.properties as fallback")
+            return True
+        else:
+            err("No fallback — server.properties not found locally")
+            return False
+
+    ok(f"server.properties pulled from {ip}")
+
+    if props_path.stat().st_size == 0:
+        err("server.properties is empty")
+        return False
+
+    pulled = _parse_properties(props_path)
+    info(f"Pulled {len(pulled)} key(s) from remote")
+    return True
+
+
 def _parse_properties(path: Path) -> dict[str, str]:
     """Parse server.properties jadi dict, skip comments dan blank lines."""
     result = {}
@@ -736,7 +791,7 @@ LATEST_LOG: Path | None = None
 def deploy(ip: str, unicode_code: str, nama: str) -> bool:
     global LATEST_LOG
 
-    total = 3
+    total = 4
 
     # Step 1: Sync files
     console.print(f"\n[{GREY}][1/{total}][/] Syncing files...")
@@ -744,14 +799,20 @@ def deploy(ip: str, unicode_code: str, nama: str) -> bool:
         err("Yah sync files gagal men, gagal nembak nich")
         return False
 
-    # Step 2: Override key lokal
-    console.print(f"\n[{GREY}][2/{total}][/] Overriding local config...")
+    # Step 2: Pull server.properties dari remote
+    console.print(f"\n[{GREY}][2/{total}][/] Pulling remote config...")
+    if not pull_remote_properties(ip):
+        err("Yah pull remote juga gagal men, gagal nembak nich")
+        return False
+
+    # Step 3: Override key lokal
+    console.print(f"\n[{GREY}][3/{total}][/] Overriding local config...")
     if not update_properties(ip, unicode_code):
         err("Yah update properties juga gagal nich men, gagal nembak juga nich")
         return False
 
-    # Step 3: Run agent
-    console.print(f"\n[{GREY}][3/{total}][/] Launching agent...")
+    # Step 4: Run agent
+    console.print(f"\n[{GREY}][4/{total}][/] Launching agent...")
     launched, log_file = run_agent()
     LATEST_LOG = log_file
     if not launched:
