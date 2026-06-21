@@ -577,7 +577,7 @@ func main() {
 		fmt.Println()
 
 		if !canAccess(tpUser, action) {
-			logErr("Access denied: You don't have permission for this action")
+			logErr("Akses ditolak men! Lu ga punya permission buat ini.")
 			fmt.Println()
 			fmt.Println(dimStyle.Render("  [enter] balik ke menu..."))
 			fmt.Scanln()
@@ -755,11 +755,12 @@ func runParkeeLauncher() {
 func runLocationLookup() {
 	locs, err := loadLocations()
 	if err != nil {
-		logErr("Gagal load data lokasi: " + err.Error())
+		logErr("Gagal load data lokasi men: " + err.Error())
 		return
 	}
 
-	options := make([]huh.Option[string], 0, len(locs))
+	options := make([]huh.Option[string], 0, len(locs)+1)
+	options = append(options, huh.NewOption("Ketik aja nama lokasi atau unicode nya men", "back"))
 	for _, l := range locs {
 		label := fmt.Sprintf("%-8s | %-45s | %s", l.Unicode, truncate(l.Nama, 45), l.IP)
 		options = append(options, huh.NewOption(label, l.Unicode))
@@ -779,6 +780,10 @@ func runLocationLookup() {
 
 	if err := form.Run(); err != nil {
 		logWarn("Lookup dibatalkan.")
+		return
+	}
+
+	if selectedUnicode == "back" {
 		return
 	}
 
@@ -819,26 +824,26 @@ func runLocationLookup() {
 		nil,
 	)
 	if err != nil {
-		logErr("Gagal bikin request: " + err.Error())
+		logErr("Gagal bikin request men: " + err.Error())
 		return
 	}
 	req.Header.Set("X-Gasak-Token", GasakDistToken)
 
 	resp, err := client.Do(req)
 	if err != nil {
-		logErr("Vault server ga bisa dihubungi: " + err.Error())
+		logErr("Vault server ga bisa dihubungi men: " + err.Error())
 		return
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		logErr("Gagal baca response: " + err.Error())
+		logErr("Gagal baca response men: " + err.Error())
 		return
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		logErr(fmt.Sprintf("Vault server error (%d): %s", resp.StatusCode, string(body)))
+		logErr(fmt.Sprintf("Vault server error men (%d): %s", resp.StatusCode, string(body)))
 		return
 	}
 
@@ -1659,12 +1664,12 @@ func checkPythonTk() bool {
 func runFetchLog() {
 	locs, err := loadLocations()
 	if err != nil {
-		logErr("Gagal load data lokasi: " + err.Error())
+		logErr("Gagal load data lokasi men: " + err.Error())
 		return
 	}
 
 	options := make([]huh.Option[string], 0, len(locs)+1)
-	options = append(options, huh.NewOption("← Back to Main Menu", "back"))
+	options = append(options, huh.NewOption("Ketik ", "back"))
 	for _, l := range locs {
 		label := fmt.Sprintf("%-8s | %-45s | %s", l.Unicode, truncate(l.Nama, 45), l.IP)
 		options = append(options, huh.NewOption(label, l.Unicode))
@@ -1721,7 +1726,7 @@ func runFetchLog() {
 	}
 
 	var logOpts []huh.Option[int]
-	logOpts = append(logOpts, huh.NewOption("← Back to Location Selection", -1))
+	logOpts = append(logOpts, huh.NewOption("Ketik aja nama lokasi atau unicode nya men", -1))
 	for idx, src := range logSources {
 		if src.AllowedForL2 && !tpUser.IsL2 {
 			continue
