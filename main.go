@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	AppVersion = "1.2.9"
+	AppVersion = "1.3.0"
 )
 
 var (
@@ -271,13 +271,10 @@ type LogSource struct {
 }
 
 var logSources = []LogSource{
-	// --- SERVER LOGS (ada di server main lokasi) ---
 	{Name: "[Server] Watersheep", Path: "/var/log/agent/watersheep", AllowedForL2: false, IsDir: true, IsAgentLog: false},
 	{Name: "[Server] Fisherman", Path: "/var/log/agentweebhook", AllowedForL2: false, IsDir: true, IsAgentLog: false},
 	{Name: "[Server] Syslog", Path: "/var/log/syslog", AllowedForL2: false, IsDir: false, IsAgentLog: false},
 	{Name: "[Server] PostgreSQL", Path: "/var/log/postgresql", AllowedForL2: true, IsDir: true, IsAgentLog: false},
-
-	// --- AGENT LOGS (ada di masing-masing gate PC) ---
 	{Name: "[Agent] Parkee Agent (/var/log/agent/parkee-agent)", Path: "/var/log/agent/parkee-agent", AllowedForL2: false, IsDir: true, IsAgentLog: true},
 	{Name: "[Agent] Parkee Agent (/var/tmp/application)", Path: "/var/tmp/application", AllowedForL2: false, IsDir: true, IsAgentLog: true},
 }
@@ -1658,15 +1655,14 @@ func checkPythonTk() bool {
 }
 
 func runFetchLog() {
-	// ─── STEP 1: LOAD DATA LOKASI VIA CORE FUNCTION ───
 	locs, err := loadLocations()
 	if err != nil {
 		logErr("Gagal load data lokasi: " + err.Error())
 		return
 	}
 
-	// ─── STEP 2: DROP DOWN SELECTOR LOKASI DENGAN FILTERING ───
-	options := make([]huh.Option[string], 0, len(locs))
+	options := make([]huh.Option[string], 0, len(locs)+1)
+	options = append(options, huh.NewOption("← Back to Main Menu", "back"))
 	for _, l := range locs {
 		label := fmt.Sprintf("%-8s | %-45s | %s", l.Unicode, truncate(l.Nama, 45), l.IP)
 		options = append(options, huh.NewOption(label, l.Unicode))
@@ -1689,6 +1685,10 @@ func runFetchLog() {
 		return
 	}
 
+	if selectedUnicode == "back" {
+		return
+	}
+
 	var selectedLoc *Location
 	for _, l := range locs {
 		if l.Unicode == selectedUnicode {
@@ -1706,7 +1706,6 @@ func runFetchLog() {
 	logOK(fmt.Sprintf("Target Terpilih: %s [%s] — %s", selectedLoc.Nama, strings.ToUpper(selectedLoc.Unicode), selectedLoc.IP))
 	fmt.Println()
 
-	// ─── STEP 3: ROLE DETECTION (L1 / L2 SAFETY LAYER) ───
 	isUserL2 := false
 	currentUsername := "support"
 	if os.Getenv("GASAK_ROLE") == "admin" || os.Getenv("GASAK_ROLE") == "l2" || os.Getenv("PARKEE_SSH_USER") == "server" {
@@ -1719,10 +1718,9 @@ func runFetchLog() {
 		IsL2:     isUserL2,
 	}
 
-	// ─── STEP 4: GENERATE MENU OPSI LOG DARI STRUCT logSources ───
-	var logOpts []huh.Option[int] // simpan index dari logSources
+	var logOpts []huh.Option[int]
+	logOpts = append(logOpts, huh.NewOption("← Back to Location Selection", -1))
 	for idx, src := range logSources {
-		// Validasi filter: kalau log khusus L2 tapi user saat ini cuma L1, skip jangan tampilin
 		if src.AllowedForL2 && !tpUser.IsL2 {
 			continue
 		}
@@ -1744,10 +1742,13 @@ func runFetchLog() {
 		return
 	}
 
-	// Ambil metadata target log berdasarkan index terpilih
+	if selectedLogIdx == -1 {
+		runFetchLog()
+		return
+	}
+
 	chosenLog := logSources[selectedLogIdx]
 
-	// ─── STEP 5: EKSEKUSI UTILITY SINKRON BERDASARKAN METADATA STRUCT ───
 	if chosenLog.IsAgentLog {
 		logInfo("Memulai orchestrator pemanggilan cluster gate via internal bridge...")
 		fetchAgentGateLog(tpUser, selectedLoc, chosenLog.Path, chosenLog.Name)
@@ -1874,7 +1875,6 @@ func scpFile(tpUser *TeleportUser, loc *Location, remotePath string, filename st
 	}
 	destPath := filepath.Join(destDir, filename)
 
-	// Auto compress .log yang belum gz sebelum SCP
 	if strings.HasSuffix(remotePath, ".log") {
 		logInfo("File .log terdeteksi — auto compressing dulu di server...")
 		gzPath := remotePath + ".gz"
@@ -1947,12 +1947,10 @@ type GateInfo struct {
 }
 
 func queryGatesFromDB(tpUser *TeleportUser, loc *Location) ([]GateInfo, error) {
-	// L2: Langsung via Teleport (server@server-xxx)
 	if tpUser.IsL2 {
 		return queryGatesViaTeleport(tpUser, loc)
 	}
 
-	// L1: Via SSH ke server dulu, baru jalankan psql di sana
 	return queryGatesViaSSH(loc)
 }
 
@@ -2237,8 +2235,6 @@ func scpGateFileViaServerPos(tpUser *TeleportUser, loc *Location, gate GateInfo,
 	fmt.Println(dimStyle.Render("  Ini mungkin butuh waktu ya men, tergantung ukuran file..."))
 	fmt.Println()
 
-	// Auto compress .log sebelum hop
-	// Auto compress + hop1 — gzip di gate dulu, baru scp ke server main
 	if strings.HasSuffix(remoteFilePath, ".log") {
 		logInfo("Auto compressing .log di gate sebelum jump...")
 		gzRemote := "/tmp/" + filename + ".gz"
@@ -2277,7 +2273,6 @@ func scpGateFileViaServerPos(tpUser *TeleportUser, loc *Location, gate GateInfo,
 			filename = filename + ".gz"
 			destPath = filepath.Join(filepath.Dir(destPath), filename)
 
-			// Cleanup .gz di gate
 			cleanGzGate := fmt.Sprintf(
 				"sshpass -p '%s' ssh -o StrictHostKeyChecking=no %s@%s 'rm -f %s'",
 				gatePass, gate.UserPC, gate.IP, gzRemote,
