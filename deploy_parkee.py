@@ -949,13 +949,7 @@ def deploy(ip: str, unicode_code: str, nama: str) -> bool:
     if not wait_startup_log(log_file):
         err("Agent startup failed")
         return False
-    try:
-        props_path = Path(SERVER_PROPS)
-        if props_path.exists():
-            props_path.write_text("")
-            ok("server.properties cleared successfully (file retained)")
-    except Exception as e:
-        warn(f"Gagal mengosongkan server.properties: {e}")
+
     return True
 
 
