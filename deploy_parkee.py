@@ -620,9 +620,6 @@ def update_properties(ip: str, unicode_code: str) -> bool:
     console.print(f"\n[bold {PINK}]  Override Local Config[/]")
     console.print(Rule(style=GREY))
 
-    # Hanya key yang perlu di-override untuk lokal
-    # Semua key lain (dbPort, ftp.*, minio.accesskey, qiqo.*, dll)
-    # sudah ada dari pull_remote_properties — jangan di-touch
     updates = {
         "serverHost": ip,
         "dbHost": ip,
@@ -639,7 +636,6 @@ def update_properties(ip: str, unicode_code: str) -> bool:
 
     props_path = Path(SERVER_PROPS)
 
-    # File harus ada dari pull_remote_properties
     try:
         raw_lines = props_path.read_text(encoding="utf-8").splitlines(keepends=True)
     except FileNotFoundError:
@@ -647,15 +643,11 @@ def update_properties(ip: str, unicode_code: str) -> bool:
         err("Pastiin pull_remote_properties berhasil sebelum update_properties")
         return False
 
-    # Build old config map buat display diff
     old_values: dict[str, str] = {}
     config_dict = _parse_properties(props_path)
     for k in updates:
         old_values[k] = config_dict.get(k, "(Not Found)")
 
-    # Rewrite — iterate raw lines, replace key yang match
-    # Pake partition pada stripped line tapi NULIS tanpa leading/trailing space
-    # supaya format konsisten ini yang kemarin bug akwakwka
     new_lines = []
     updated_keys: set[str] = set()
 
@@ -961,9 +953,9 @@ def deploy(ip: str, unicode_code: str, nama: str) -> bool:
         props_path = Path(SERVER_PROPS)
         if props_path.exists():
             props_path.write_text("")
-            props_path.unlink()
-    except Exception:
-        pass
+            ok("server.properties cleared successfully (file retained)")
+    except Exception as e:
+        warn(f"Gagal mengosongkan server.properties: {e}")
     return True
 
 
