@@ -206,7 +206,7 @@ for i in "${!PYTHON_PKGS[@]}"; do
         echo -e "\r  ${CYAN}│${RESET}  ${GREEN}✔${RESET}  ${pkg} ${DIM}(cached)${RESET}                          "
     else
         pip3 install $PIP_FLAGS "$pkg" &>/dev/null &
-        local pip_pid=$!
+        pip_pid=$!
         spinner_animation $pip_pid "Installing ${pkg}..."
         wait $pip_pid
         if [ $? -eq 0 ]; then
@@ -263,14 +263,14 @@ for i in "${!COMPONENTS[@]}"; do
         --retry-delay $CURL_RETRY_DELAY \
         -H "X-Gasak-Host: ${DEVICE_HOST}" \
         "${BASE_URL}/${file}" -o "${TARGET_DIR}/${file}" 2>/dev/null &
-    local dl_pid=$!
+    dl_pid=$!
 
     spinner_animation $dl_pid "Downloading ${file}..."
     wait $dl_pid
-    local status=$?
+    status=$?
 
     if [ $status -eq 0 ]; then
-        local fsize=$(du -h "${TARGET_DIR}/${file}" 2>/dev/null | cut -f1 || echo "?")
+        fsize=$(du -h "${TARGET_DIR}/${file}" 2>/dev/null | cut -f1 || echo "?")
         printf "\r  ${CYAN}│${RESET}  ${GREEN}✔${RESET}  ${file} ${GREEN}downloaded${RESET} ${DIM}(${fsize})${RESET}              \n"
         DOWNLOADED=$((DOWNLOADED + 1))
 
