@@ -2360,7 +2360,6 @@ hop2:
 		return
 	}
 
-	// Cleanup /tmp/<filename> di server main
 	cleanupCmd := fmt.Sprintf("rm -f %s", tmpPath)
 	if tpUser.IsL2 {
 		nodeName := nodeNameFromUnicode(loc.Unicode)

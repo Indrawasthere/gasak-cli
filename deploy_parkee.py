@@ -10,7 +10,6 @@ import os
 import signal
 import subprocess
 import sys
-import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -19,13 +18,9 @@ import questionary
 import requests
 from iterfzf import iterfzf
 from questionary import Style as QStyle
-from rich import print as rprint
 from rich.align import Align
-from rich.columns import Columns
 from rich.console import Console
-from rich.live import Live
 from rich.panel import Panel
-from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 from rich.prompt import Confirm
 from rich.rule import Rule
 from rich.style import Style
@@ -63,8 +58,6 @@ SERVER_PROPS = f"{APP_DIR}/server.properties"
 JAVA_BIN = "/usr/lib/jvm/bellsoft-java15-full-amd64/bin/java"
 JAR_NAME = "parkee-agent-production.jar"
 AGENT_JAR_PATH = "/mnt/shared/production/parkee-agent-production.jar"
-
-REMOTE_PROPS_PATH = f"{APP_DIR}/server.properties"
 
 FILES_TO_SYNC = [
     "/mnt/shared/production/parkee-agent-production.jar",
@@ -528,59 +521,6 @@ def sync_files(ip: str) -> bool:
 # ─────────────────────────────────────────────────────────────
 
 
-def pull_remote_properties(ip: str) -> bool:
-    """
-    Pull server.properties dari remote via SSH → simpan ke local SERVER_PROPS.
-    Ini jadi base config — semua key lokasi-spesifik (port, ftp, minio, qiqo, dll)
-    langsung dari source of truth remote, bukan hardcoded.
-    """
-    console.print(f"\n[bold {PINK}]  Pull server.properties from Remote[/]")
-    console.print(Rule(style=GREY))
-
-    props_path = Path(SERVER_PROPS)
-    props_path.parent.mkdir(parents=True, exist_ok=True)
-
-    cmd = [
-        "sshpass",
-        "-p",
-        SSH_PASS,
-        "scp",
-        "-o",
-        "StrictHostKeyChecking=no",
-        "-o",
-        "LogLevel=ERROR",
-        "-o",
-        f"ConnectTimeout={SSH_TIMEOUT}",
-        f"{SSH_USER}@{ip}:{REMOTE_PROPS_PATH}",
-        str(props_path),
-    ]
-
-    with console.status("[cyan]Pulling server.properties...[/]", spinner="dots"):
-        result = subprocess.run(cmd, capture_output=True, text=True)
-
-    if result.returncode != 0:
-        err(f"Failed to pull server.properties from {ip}")
-        err(f"SCP error: {result.stderr.strip()}")
-        if props_path.exists():
-            warn("Using existing local server.properties as fallback")
-            warn("Value nya ga sesuai nih men")
-            return True  # bisa lanjut tapi ada warning awkawkawka
-        else:
-            err("Tidak ada fallback — gaada server.properties lokal")
-            return False
-
-    ok(f"server.properties pulled from {ip}")
-
-    # Sanity check — mastiin file ga kosong
-    if props_path.stat().st_size == 0:
-        err("server.properties yang di-pull kosong — sesuatu ga beres nih men")
-        return False
-
-    pulled = _parse_properties(props_path)
-    info(f"Pulled {len(pulled)} key(s) from remote")
-    return True
-
-
 def _parse_properties(path: Path) -> dict[str, str]:
     """Parse server.properties jadi dict, skip comments dan blank lines."""
     result = {}
@@ -746,12 +686,10 @@ def run_agent() -> tuple[bool, Path]:
         err(f"JAR not found: {jar_path}")
         return False, log_file
 
-    # Kill existing — targeted by JAR name
-    result = subprocess.run(["pgrep", "-f", JAR_NAME], capture_output=True, text=True)
-    if result.returncode == 0:
-        warn("Killing existing agent instance...")
-        subprocess.run(["pkill", "-f", JAR_NAME], capture_output=True)
-        time.sleep(1)
+    # Kill existing — aggressive killall like py_deploy_new.py
+    warn("Killing all existing java instances...")
+    subprocess.run(["killall", "-9", "java"], capture_output=True)
+    time.sleep(1)
 
     info(f"Starting agent → log: {log_file}")
 
@@ -789,125 +727,7 @@ def run_agent() -> tuple[bool, Path]:
 
 
 # ─────────────────────────────────────────────────────────────
-# WAIT STARTUP — monitor log file
-# ─────────────────────────────────────────────────────────────
-
-STARTUP_OK_PATTERNS = [
-    "Started [A-Za-z]+Application",
-    r"HikariPool.*Start completed",
-    "centerX\\s*:",
-    "Application started",
-    # Agent udah boot, DB belum konek — tetep valid startup signal dengan suatu kondisi tapi
-    "Failed Connecting to Database, retrying",
-    "SplashPreloader",
-    "JavaFX Application Thread",
-]
-
-FATAL_PATTERNS = [
-    "Exception in thread",
-    "Address already in use",
-    "BUILD FAILED",
-]
-
-
-def wait_startup_log(log_file: Path, timeout: int = 60) -> bool:
-    import re
-
-    from rich.live import Live
-    from rich.spinner import Spinner
-
-    info(f"Tunggu agent startup men, bentar (max {timeout}s)...")
-
-    ok_re = re.compile("|".join(STARTUP_OK_PATTERNS))
-    fatal_re = re.compile("|".join(FATAL_PATTERNS))
-
-    result_holder = {"status": None}
-
-    def _monitor():
-        for i in range(1, timeout + 1):
-            if log_file.exists():
-                try:
-                    content = log_file.read_text(errors="replace")
-                except Exception:
-                    content = ""
-
-                if ok_re.search(content):
-                    time.sleep(2)
-                    check = subprocess.run(
-                        ["pgrep", "-f", JAR_NAME], capture_output=True, text=True
-                    )
-                    if check.returncode == 0:
-                        result_holder["status"] = ("ok", i)
-                    else:
-                        result_holder["status"] = ("crashed", i)
-                    return
-
-                if fatal_re.search(content) and not ok_re.search(content):
-                    result_holder["status"] = ("fatal", i)
-                    return
-
-            time.sleep(1)
-
-        result_holder["status"] = ("timeout", timeout)
-
-    monitor_thread = threading.Thread(target=_monitor, daemon=True)
-    monitor_thread.start()
-
-    # Rich Live spinner yang better daripada per detik info
-    with Live(console=console, refresh_per_second=4, transient=True) as live:
-        i = 0
-        while monitor_thread.is_alive():
-            i += 1
-            live.update(Text(f"  ⏳ waiting startup  {i}s", style=GREY))
-            time.sleep(0.25)
-        monitor_thread.join()
-
-    # Handle result
-    status_val = result_holder["status"]
-
-    if status_val is None:
-        status_val = ("timeout", timeout)
-
-    kind, elapsed = status_val
-
-    if kind == "ok":
-        ok(f"GASAK MEN! ({elapsed}s)")
-        return True
-    elif kind == "crashed":
-        err("Agent crashed after startup signal")
-        _tail_log(log_file, lines=5)
-        return False
-    elif kind == "fatal":
-        err("Fatal error detected in agent log")
-        _tail_log(log_file, lines=5)
-        return False
-    else:
-        still_running = (
-            subprocess.run(["pgrep", "-f", JAR_NAME], capture_output=True).returncode
-            == 0
-        )
-        status_str = "still running" if still_running else "not found"
-        err(f"Startup timeout after {timeout}s — process {status_str}")
-        if log_file.exists():
-            _tail_log(log_file, lines=8)
-        return False
-
-
-def _tail_log(log_file: Path, lines: int = 5):
-    content = log_file.read_text(errors="replace").splitlines()
-    filtered = [
-        l
-        for l in content
-        if not l.strip().startswith("at ") and l.strip() and "Gdk-WARNING" not in l
-    ]
-    tail = filtered[-lines:]
-    console.print(f"\n[{GREY}]  --- last {lines} log lines ---[/]")
-    for l in tail:
-        console.print(f"  [{GREY}]{l}[/]")
-
-
-# ─────────────────────────────────────────────────────────────
-# DEPLOY FLOW — dengan progress bar
+# DEPLOY FLOW
 # ─────────────────────────────────────────────────────────────
 
 LATEST_LOG: Path | None = None
@@ -916,38 +736,26 @@ LATEST_LOG: Path | None = None
 def deploy(ip: str, unicode_code: str, nama: str) -> bool:
     global LATEST_LOG
 
-    total = 5
+    total = 3
 
-    # Step 1: Sync files (Menyamakan handling error versi baru)
+    # Step 1: Sync files
     console.print(f"\n[{GREY}][1/{total}][/] Syncing files...")
     if not sync_files(ip):
         err("Yah sync files gagal men, gagal nembak nich")
         return False
 
-    # Step 2: Pull server.properties dari remote
-    console.print(f"\n[{GREY}][2/{total}][/] Pulling remote config...")
-    if not pull_remote_properties(ip):
-        err("Yah pull remote juga gagal men, gagal nembak nich")
-        return False
-
-    # Step 3: Override key lokal
-    console.print(f"\n[{GREY}][3/{total}][/] Overriding local config...")
+    # Step 2: Override key lokal
+    console.print(f"\n[{GREY}][2/{total}][/] Overriding local config...")
     if not update_properties(ip, unicode_code):
         err("Yah update properties juga gagal nich men, gagal nembak juga nich")
         return False
 
-    # Step 4: Run agent
-    console.print(f"\n[{GREY}][4/{total}][/] Launching agent...")
+    # Step 3: Run agent
+    console.print(f"\n[{GREY}][3/{total}][/] Launching agent...")
     launched, log_file = run_agent()
     LATEST_LOG = log_file
     if not launched:
         err("Sorry men, gagal nembak agent :(")
-        return False
-
-    # Step 5: Wait startup
-    console.print(f"\n[{GREY}][5/{total}][/] Waiting startup...")
-    if not wait_startup_log(log_file):
-        err("Agent startup failed")
         return False
 
     return True
