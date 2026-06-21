@@ -717,7 +717,7 @@ func runParkeeLauncher() {
 	if os.Getenv("PARKEE_SSH_USER") == "" || os.Getenv("PARKEE_SSH_PASS") == "" {
 		logErr("SSH credentials belum di-set di .env atau vault!")
 		logInfo("Tambahkan ke ~/.env atau ~/gasak-dist/.env:")
-		fmt.Println(dimStyle.Render("  PARKEE_SSH_USER=support  # gunakan 'support' untuk L1 atau 'server' untuk L2"))
+		fmt.Println(dimStyle.Render("  PARKEE_SSH_USER=support  # pake 'support' buat L1 atau 'server' untuk L2"))
 		fmt.Println(dimStyle.Render("  PARKEE_SSH_PASS=<password>"))
 		return
 	}

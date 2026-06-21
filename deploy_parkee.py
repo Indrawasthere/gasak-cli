@@ -918,19 +918,19 @@ def deploy(ip: str, unicode_code: str, nama: str) -> bool:
 
     total = 5
 
-    # Step 1: Sync files
+    # Step 1: Sync files (Menyamakan handling error versi baru)
     console.print(f"\n[{GREY}][1/{total}][/] Syncing files...")
     if not sync_files(ip):
         err("Yah sync files gagal men, gagal nembak nich")
         return False
 
-    # Step 2: Pull server.properties dari remote (base config)
+    # Step 2: Pull server.properties dari remote
     console.print(f"\n[{GREY}][2/{total}][/] Pulling remote config...")
     if not pull_remote_properties(ip):
         err("Yah pull remote juga gagal men, gagal nembak nich")
         return False
 
-    # Step 3: Override key lokal di atas base remote config
+    # Step 3: Override key lokal
     console.print(f"\n[{GREY}][3/{total}][/] Overriding local config...")
     if not update_properties(ip, unicode_code):
         err("Yah update properties juga gagal nich men, gagal nembak juga nich")
