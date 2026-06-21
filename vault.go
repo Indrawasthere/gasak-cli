@@ -46,6 +46,10 @@ type VaultSecrets struct {
 	GsheetPlocId     string `json:"GSHEET_PLOC_ID"`
 	GsheetPlocSrvGid string `json:"GSHEET_PLOC_SERVERS_GID"`
 	GsheetPlocZtGid  string `json:"GSHEET_PLOC_ZEROTIER_GID"`
+	GasakVaultURL    string `json:"GASAK_VAULT_URL"`
+	GasakDistURL     string `json:"GASAK_DIST_URL"`
+	GasakDistToken   string `json:"GASAK_DIST_TOKEN"`
+	GasakSshSupeng   string `json:"GASAK_SSH_SUPENG"`
 }
 
 func loadVault() (*VaultSecrets, error) {

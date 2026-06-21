@@ -42,6 +42,10 @@ type SecretPayload struct {
 	GsheetPlocId     string `json:"GSHEET_PLOC_ID"`
 	GsheetPlocSrvGid string `json:"GSHEET_PLOC_SERVERS_GID"`
 	GsheetPlocZtGid  string `json:"GSHEET_PLOC_ZEROTIER_GID"`
+	GasakVaultURL    string `json:"GASAK_VAULT_URL"`
+	GasakDistURL     string `json:"GASAK_DIST_URL"`
+	GasakDistToken   string `json:"GASAK_DIST_TOKEN"`
+	GasakSshSupeng   string `json:"GASAK_SSH_SUPENG"`
 }
 
 type ClientRequest struct {
@@ -79,7 +83,8 @@ func handlePloc(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
 	token := r.Header.Get("X-Gasak-Token")
-	if token != "gsk_dist_9f2k7x" {
+	expectedToken := os.Getenv("GASAK_DIST_TOKEN")
+	if token != expectedToken {
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprintln(w, "Unauthorized")
 		return
@@ -153,6 +158,10 @@ func handleGetEnv(w http.ResponseWriter, r *http.Request) {
 		GsheetPlocId:     os.Getenv("GSHEET_PLOC_ID"),
 		GsheetPlocSrvGid: os.Getenv("GSHEET_PLOC_SERVERS_GID"),
 		GsheetPlocZtGid:  os.Getenv("GSHEET_PLOC_ZEROTIER_GID"),
+		GasakVaultURL:    os.Getenv("GASAK_VAULT_URL"),
+		GasakDistURL:     os.Getenv("GASAK_DIST_URL"),
+		GasakDistToken:   os.Getenv("GASAK_DIST_TOKEN"),
+		GasakSshSupeng:   os.Getenv("GASAK_SSH_SUPENG"),
 	}
 
 	plaintext, err := json.Marshal(secrets)
@@ -234,7 +243,8 @@ func handleLocateGate(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	token := r.Header.Get("X-Gasak-Token")
-	if token != "gsk_dist_9f2k7x" {
+	expectedToken := os.Getenv("GASAK_DIST_TOKEN")
+	if token != expectedToken {
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"error": "Unauthorized",

@@ -48,6 +48,11 @@ var (
 	PlocSpreadsheetID string
 	PlocServersGID    string
 	PlocZerotierGID   string
+
+	VaultServerURL string
+	DistServerURL  string
+	GasakDistToken string
+	GasakSshSupeng string
 )
 
 type LocateResponse struct {
@@ -120,10 +125,18 @@ func init() {
 	PlocSpreadsheetID = os.Getenv("GSHEET_PLOC_ID")
 	PlocServersGID = os.Getenv("GSHEET_PLOC_SERVERS_GID")
 	PlocZerotierGID = os.Getenv("GSHEET_PLOC_ZEROTIER_GID")
+
+	VaultServerURL = os.Getenv("GASAK_VAULT_URL")
+	DistServerURL = os.Getenv("GASAK_DIST_URL")
+	GasakDistToken = os.Getenv("GASAK_DIST_TOKEN")
+	GasakSshSupeng = os.Getenv("GASAK_SSH_SUPENG")
+
+	UpdateURL = DistServerURL + "/version.txt"
+	BinaryURL = DistServerURL + "/gasak"
 }
 
-const UpdateURL = "http://10.70.0.110:9001/version.txt"
-const BinaryURL = "http://10.70.0.110:9001/gasak"
+var UpdateURL string
+var BinaryURL string
 
 var (
 	csvURL       string
@@ -462,7 +475,7 @@ func checkAndRunUpdate() {
 				"install.sh",
 			}
 
-			baseURL := "http://10.70.0.110:9001"
+			baseURL := DistServerURL
 			hostname, _ := os.Hostname()
 
 			for _, s := range scripts {
@@ -792,7 +805,7 @@ func runLocationLookup() {
 	if tpUser.IsL2 {
 		logInfo("Fetching via ploc, wait up men")
 		fmt.Println()
-		runInteractive("ssh", "parkee@10.70.0.110",
+		runInteractive("ssh", GasakSshSupeng,
 			fmt.Sprintf("cd /home/parkee/gasak-dist && /usr/bin/python3 ploc_method.py %s -p", strings.ToLower(selectedLoc.Unicode)),
 		)
 		return
@@ -803,14 +816,14 @@ func runLocationLookup() {
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	req, err := http.NewRequest("GET",
-		fmt.Sprintf("http://10.70.0.110:9002/api/ploc?keyword=%s", strings.ToLower(selectedLoc.Unicode)),
+		fmt.Sprintf(VaultServerURL+"/api/ploc?keyword=%s", strings.ToLower(selectedLoc.Unicode)),
 		nil,
 	)
 	if err != nil {
 		logErr("Gagal bikin request: " + err.Error())
 		return
 	}
-	req.Header.Set("X-Gasak-Token", "gsk_dist_9f2k7x")
+	req.Header.Set("X-Gasak-Token", GasakDistToken)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -2445,4 +2458,8 @@ func applyVaultSecrets(s *VaultSecrets) {
 	os.Setenv("GSHEET_PLOC_ID", s.GsheetPlocId)
 	os.Setenv("GSHEET_PLOC_SERVERS_GID", s.GsheetPlocSrvGid)
 	os.Setenv("GSHEET_PLOC_ZEROTIER_GID", s.GsheetPlocZtGid)
+	os.Setenv("GASAK_VAULT_URL", s.GasakVaultURL)
+	os.Setenv("GASAK_DIST_URL", s.GasakDistURL)
+	os.Setenv("GASAK_DIST_TOKEN", s.GasakDistToken)
+	os.Setenv("GASAK_SSH_SUPENG", s.GasakSshSupeng)
 }
