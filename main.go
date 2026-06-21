@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	AppVersion = "1.3.0"
+	AppVersion = "1.3.1"
 )
 
 var (
@@ -484,6 +484,8 @@ func checkAndRunUpdate() {
 					continue
 				}
 				req.Header.Set("X-Gasak-Host", hostname)
+				req.Header.Set("X-Gasak-Version", AppVersion)
+				req.Header.Set("X-Gasak-User", getUserName())
 
 				client := &http.Client{Timeout: 15 * time.Second}
 				resp, err := client.Do(req)

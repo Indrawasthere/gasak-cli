@@ -262,6 +262,8 @@ for i in "${!COMPONENTS[@]}"; do
         --retry $CURL_RETRIES \
         --retry-delay $CURL_RETRY_DELAY \
         -H "X-Gasak-Host: ${DEVICE_HOST}" \
+        -H "X-Gasak-Version: $(cat "${TARGET_DIR}/version.txt" 2>/dev/null || echo 'installing')" \
+        -H "X-Gasak-User: ${REAL_USER}" \
         "${BASE_URL}/${file}" -o "${TARGET_DIR}/${file}" 2>/dev/null &
     dl_pid=$!
 

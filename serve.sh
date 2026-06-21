@@ -190,6 +190,10 @@ class GasakDistHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_checksums()
             return
 
+        if parsed.path == '/logs':
+            self.handle_logs(parsed)
+            return
+
         if parsed.path.startswith('/getenv'):
             self.handle_getenv(parsed)
             return
@@ -300,6 +304,33 @@ class GasakDistHandler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(response.encode())
 
         self.log_request_detail(200, '/checksums.sha256', f"OK — {len(checksums)} checksums")
+
+    def handle_logs(self, parsed):
+        params = parse_qs(parsed.query)
+        try:
+            num_lines = int(params.get('lines', ['20'])[0])
+        except:
+            num_lines = 20
+
+        try:
+            if os.path.exists(LOG_FILE):
+                with open(LOG_FILE, 'r', errors='replace') as f:
+                    all_lines = f.readlines()
+                    recent = all_lines[-num_lines:]
+                    response = "".join(recent)
+            else:
+                response = "No logs available\n"
+        except Exception as e:
+            response = f"Error reading logs: {e}\n"
+
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/plain; charset=utf-8')
+        self.send_header('Content-Length', str(len(response)))
+        self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+        self.end_headers()
+        self.wfile.write(response.encode())
+
+        self.log_request_detail(200, '/logs', f"OK — {num_lines} lines")
 
     def handle_getenv(self, parsed):
         params = parse_qs(parsed.query)
