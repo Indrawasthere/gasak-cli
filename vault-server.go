@@ -124,7 +124,7 @@ func handleGetEnv(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Token != "GASAK_DIST_TOKEN" {
+	if req.Token != os.Getenv("GASAK_DIST_TOKEN") {
 		w.WriteHeader(http.StatusUnauthorized)
 		logAccess(r, http.StatusUnauthorized, "Token distribusi tidak valid")
 		return

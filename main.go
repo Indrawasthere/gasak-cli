@@ -545,7 +545,7 @@ func main() {
 			huh.NewOption("Ambil Log", "fetch_log"),
 			huh.NewOption("Settlement RFS", "settlement_rfs"),
 			huh.NewOption("Settlement Decode", "settlement_decode"),
-			//huh.NewOption("Reader Script", "xxxx.sh"),
+			huh.NewOption("Inject Reader", "reader_script"),
 		)
 
 		if tpUser.IsL2 {
@@ -629,6 +629,8 @@ func main() {
 			runSettlementRFS()
 		case "settlement_decode":
 			runSettlementDecode()
+		case "reader_script":
+			runReaderScript()
 		case "superfile":
 			runSuperfile()
 		case "crush_open":
@@ -666,6 +668,7 @@ func canAccess(tpUser *TeleportUser, action string) bool {
 		"fetch_log":         true,
 		"settlement_rfs":    true,
 		"settlement_decode": true,
+		"reader_script":     true,
 		"exit":              true,
 	}
 
@@ -813,6 +816,18 @@ func runLocationLookup() {
 		runInteractive("ssh", GasakSshSupeng,
 			fmt.Sprintf("cd /home/parkee/gasak-dist && /usr/bin/python3 ploc_method.py %s -p", strings.ToLower(selectedLoc.Unicode)),
 		)
+		return
+	}
+
+	if VaultServerURL == "" {
+		logErr("Vault server URL belum di-set men!")
+		logInfo("Pastikan GASAK_VAULT_URL ada di .env atau vault")
+		return
+	}
+
+	if GasakDistToken == "" {
+		logErr("Gasak dist token belum di-set men!")
+		logInfo("Pastikan GASAK_DIST_TOKEN ada di .env atau vault")
 		return
 	}
 
@@ -2434,6 +2449,28 @@ func runSettlementDecode() {
 	fmt.Println()
 
 	cmd := exec.Command("python3", scriptPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	if err := cmd.Run(); err != nil {
+		logWarn("Script exited: " + err.Error())
+	}
+}
+
+func runReaderScript() {
+	homeDir, _ := os.UserHomeDir()
+	scriptPath := filepath.Join(homeDir, "gasak-dist", "reader_script.sh")
+
+	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
+		logErr("Waduh script reader_script.sh nya gaada nih men: " + scriptPath)
+		logInfo("Coba jalanin ulang install.sh yang terbaru deng, sekalian senggol Fadlan.")
+		return
+	}
+
+	logInfo("Reader Initialization...")
+	fmt.Println()
+
+	cmd := exec.Command("bash", scriptPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
