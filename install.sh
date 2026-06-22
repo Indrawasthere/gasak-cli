@@ -108,6 +108,19 @@ echo ""
 echo -e "  ${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo ""
 
+echo -e "${BOLD}${CYAN}  ┌─ PREFLIGHT: Validating sudo access${RESET}"
+echo -e "  ${CYAN}│${RESET}"
+echo -e "  ${CYAN}│${RESET}  ${DIM}Masukkan password sudo kamu sekarang:${RESET}"
+if sudo -v 2>/dev/null; then
+    echo -e "\r  ${CYAN}│${RESET}  ${GREEN}✔${RESET}  Sudo access validated                          "
+else
+    echo -e "\r  ${CYAN}│${RESET}  ${RED}✘${RESET}  ${RED}Sudo access denied${RESET}                           "
+    echo -e "  ${CYAN}└─${RESET}"
+    exit 1
+fi
+echo -e "  ${CYAN}└─${RESET}"
+echo ""
+
 # ─── STEP 1: PRE-FLIGHT CHECK ───────────────────────────────
 echo -e "${BOLD}${CYAN}  ┌─ STEP 1/5: System Compatibility Check${RESET}"
 echo -e "  ${CYAN}│${RESET}"

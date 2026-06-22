@@ -124,7 +124,7 @@ func handleGetEnv(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Token != "gsk_dist_9f2k7x" {
+	if req.Token != "GASAK_DIST_TOKEN" {
 		w.WriteHeader(http.StatusUnauthorized)
 		logAccess(r, http.StatusUnauthorized, "Token distribusi tidak valid")
 		return
@@ -135,7 +135,6 @@ func handleGetEnv(w http.ResponseWriter, r *http.Request) {
 	pubKeyStr = strings.ReplaceAll(pubKeyStr, `\n`, "\n")
 	pubKeyStr = strings.TrimSpace(pubKeyStr)
 
-	// Jika client cuma ngirim raw string base64 tanpa header PEM
 	if !strings.Contains(pubKeyStr, "BEGIN PUBLIC KEY") {
 		pubKeyStr = fmt.Sprintf("-----BEGIN PUBLIC KEY-----\n%s\n-----END PUBLIC KEY-----", pubKeyStr)
 	}

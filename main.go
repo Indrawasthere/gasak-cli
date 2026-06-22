@@ -545,6 +545,7 @@ func main() {
 			huh.NewOption("Ambil Log", "fetch_log"),
 			huh.NewOption("Settlement RFS", "settlement_rfs"),
 			huh.NewOption("Settlement Decode", "settlement_decode"),
+			//huh.NewOption("Reader Script", "xxxx.sh"),
 		)
 
 		if tpUser.IsL2 {
