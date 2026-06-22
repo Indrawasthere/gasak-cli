@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	AppVersion = "1.3.2"
+	AppVersion = "1.3.3"
 )
 
 var (
@@ -397,18 +397,13 @@ func loadLocations() ([]Location, error) {
 		if len(row) <= max3(colUni, colNama, colIP) {
 			continue
 		}
-		unicode := strings.TrimSpace(row[colUni])
-		nama := strings.TrimSpace(row[colNama])
 		ip := strings.TrimSpace(row[colIP])
-		if unicode == "" || nama == "" || ip == "" {
-			continue
-		}
-		if strings.Contains(unicode, "#REF!") || strings.Contains(nama, "#REF!") || strings.Contains(ip, "#REF!") {
+		if ip == "" {
 			continue
 		}
 		locs = append(locs, Location{
-			Unicode: unicode,
-			Nama:    nama,
+			Unicode: strings.TrimSpace(row[colUni]),
+			Nama:    strings.TrimSpace(row[colNama]),
 			IP:      ip,
 		})
 	}
