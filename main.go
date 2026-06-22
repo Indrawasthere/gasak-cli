@@ -397,13 +397,18 @@ func loadLocations() ([]Location, error) {
 		if len(row) <= max3(colUni, colNama, colIP) {
 			continue
 		}
+		unicode := strings.TrimSpace(row[colUni])
+		nama := strings.TrimSpace(row[colNama])
 		ip := strings.TrimSpace(row[colIP])
-		if ip == "" {
+		if unicode == "" || nama == "" || ip == "" {
+			continue
+		}
+		if strings.Contains(unicode, "#REF!") || strings.Contains(nama, "#REF!") || strings.Contains(ip, "#REF!") {
 			continue
 		}
 		locs = append(locs, Location{
-			Unicode: strings.TrimSpace(row[colUni]),
-			Nama:    strings.TrimSpace(row[colNama]),
+			Unicode: unicode,
+			Nama:    nama,
 			IP:      ip,
 		})
 	}
