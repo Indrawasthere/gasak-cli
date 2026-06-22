@@ -398,7 +398,7 @@ func loadLocations() ([]Location, error) {
 			continue
 		}
 		ip := strings.TrimSpace(row[colIP])
-		if ip == "" {
+		if ip == "" || strings.Contains(ip, "#REF!") {
 			continue
 		}
 		locs = append(locs, Location{
