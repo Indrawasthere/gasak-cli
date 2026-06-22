@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	AppVersion = "1.3.1"
+	AppVersion = "1.3.2"
 )
 
 var (
@@ -342,7 +342,7 @@ func loadLocations() ([]Location, error) {
 	}
 
 	if needFetch {
-		logInfo("Fetching location data dari Google Sheet...")
+		logInfo("Fetching location data, wait up men...")
 		resp, err := http.Get(csvURL)
 		if err != nil {
 			return nil, fmt.Errorf("fetch gagal: %w", err)
@@ -552,8 +552,8 @@ func main() {
 				huh.NewOption("Superfile", "superfile"),
 				huh.NewOption("Search Outline Docs", "search_outline"),
 				huh.NewOption("Search Linear Issues", "search_linear"),
-				huh.NewOption("Crush (Under Maintenance)", "crush_open"),
-				huh.NewOption("GLPI (Under Maintenance)", "open_glpi"),
+				huh.NewOption("Crush", "crush_open"),
+				//huh.NewOption("GLPI", "open_glpi"),
 			)
 		}
 
@@ -815,7 +815,7 @@ func runLocationLookup() {
 		return
 	}
 
-	logInfo("Fetching lokasi via vault server...")
+	logInfo("Fetching lokasi, wait up men...")
 	fmt.Println()
 
 	client := &http.Client{Timeout: 30 * time.Second}
@@ -1669,7 +1669,7 @@ func runFetchLog() {
 	}
 
 	options := make([]huh.Option[string], 0, len(locs)+1)
-	options = append(options, huh.NewOption("Ketik ", "back"))
+	options = append(options, huh.NewOption("Ketik aja nama lokasi atau unicode nya men ", "back"))
 	for _, l := range locs {
 		label := fmt.Sprintf("%-8s | %-45s | %s", l.Unicode, truncate(l.Nama, 45), l.IP)
 		options = append(options, huh.NewOption(label, l.Unicode))
@@ -1757,7 +1757,7 @@ func runFetchLog() {
 	chosenLog := logSources[selectedLogIdx]
 
 	if chosenLog.IsAgentLog {
-		logInfo("Memulai orchestrator pemanggilan cluster gate via internal bridge...")
+		logInfo("Bentar orchestrator cluster gate nya lagi jalan men")
 		fetchAgentGateLog(tpUser, selectedLoc, chosenLog.Path, chosenLog.Name)
 	} else {
 		if chosenLog.IsDir {
