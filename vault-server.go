@@ -46,6 +46,17 @@ type SecretPayload struct {
 	GasakDistURL     string `json:"GASAK_DIST_URL"`
 	GasakDistToken   string `json:"GASAK_DIST_TOKEN"`
 	GasakSshSupeng   string `json:"GASAK_SSH_SUPENG"`
+	ReaderUsername   string `json:"READER_USERNAME"`
+	ReaderCoherentIp string `json:"READER_COHERENT_IP"`
+	ReaderPassword   string `json:"READER_PASSWORD"`
+	AgentServerHost  string `json:"AGENT_SERVER_HOST"`
+	AgentSshPortAlt  string `json:"AGENT_SSH_PORT_ALT"`
+	AgentDbName      string `json:"AGENT_DB_NAME"`
+	FtpHost          string `json:"READER_FTP_HOST"`
+	FtpUsername      string `json:"READER_FTP_USERNAME"`
+	QiqoPassword     string `json:"READER_QIQO_PASSWORD"`
+	QiqoSalt         string `json:"READER_QIQO_SALT"`
+	CredentialInfo   string `json:"READER_CREDENTIAL_INFO"`
 }
 
 type ClientRequest struct {
@@ -161,6 +172,17 @@ func handleGetEnv(w http.ResponseWriter, r *http.Request) {
 		GasakDistURL:     os.Getenv("GASAK_DIST_URL"),
 		GasakDistToken:   os.Getenv("GASAK_DIST_TOKEN"),
 		GasakSshSupeng:   os.Getenv("GASAK_SSH_SUPENG"),
+		ReaderUsername:   os.Getenv("READER_USERNAME"),
+		ReaderCoherentIp: os.Getenv("READER_COHERENT_IP"),
+		ReaderPassword:   os.Getenv("READER_PASSWORD"),
+		AgentServerHost:  os.Getenv("AGENT_SERVER_HOST"),
+		AgentSshPortAlt:  os.Getenv("AGENT_SSH_PORT_ALT"),
+		AgentDbName:      os.Getenv("AGENT_DB_NAME"),
+		FtpHost:          os.Getenv("READER_FTP_HOST"),
+		FtpUsername:      os.Getenv("READER_FTP_USERNAME"),
+		QiqoPassword:     os.Getenv("READER_QIQO_PASSWORD"),
+		QiqoSalt:         os.Getenv("READER_QIQO_SALT"),
+		CredentialInfo:   os.Getenv("READER_CREDENTIAL_INFO"),
 	}
 
 	plaintext, err := json.Marshal(secrets)

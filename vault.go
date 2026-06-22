@@ -50,6 +50,17 @@ type VaultSecrets struct {
 	GasakDistURL     string `json:"GASAK_DIST_URL"`
 	GasakDistToken   string `json:"GASAK_DIST_TOKEN"`
 	GasakSshSupeng   string `json:"GASAK_SSH_SUPENG"`
+	ReaderUsername   string `json:"READER_USERNAME"`
+	ReaderCoherentIp string `json:"READER_COHERENT_IP"`
+	ReaderPassword   string `json:"READER_PASSWORD"`
+	AgentServerHost  string `json:"AGENT_SERVER_HOST"`
+	AgentSshPortAlt  string `json:"AGENT_SSH_PORT_ALT"`
+	AgentDbName      string `json:"AGENT_DB_NAME"`
+	FtpHost          string `json:"READER_FTP_HOST"`
+	FtpUsername      string `json:"READER_FTP_USERNAME"`
+	QiqoPassword     string `json:"READER_QIQO_PASSWORD"`
+	QiqoSalt         string `json:"READER_QIQO_SALT"`
+	CredentialInfo   string `json:"READER_CREDENTIAL_INFO"`
 }
 
 func loadVault() (*VaultSecrets, error) {

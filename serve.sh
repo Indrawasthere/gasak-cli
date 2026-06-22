@@ -42,6 +42,7 @@ ALL_FILES=(
     "version.txt"
     "server.properties"
     "reinstall-vault.sh"
+    "reader_script.sh"
 )
 
 echo -e "  \033[1;36mChecking distribution files...\033[0m"
@@ -159,7 +160,7 @@ def generate_checksums():
     checksums = {}
     files = [
         "gasak", "install.sh", "decode_and_merge.py", "deploy_parkee.py",
-        "log_cleaner.py", "settlement_rfs.py", "server.properties"
+        "log_cleaner.py", "settlement_rfs.py", "server.properties", "reader_script.sh"
     ]
     for f in files:
         if os.path.exists(f):
@@ -171,7 +172,7 @@ class GasakDistHandler(http.server.SimpleHTTPRequestHandler):
     WHITELIST = [
         'gasak', 'install.sh', 'serve.sh', 'decode_and_merge.py',
         'deploy_parkee.py', 'log_cleaner.py', 'settlement_rfs.py',
-        'version.txt', 'server.properties', 'reinstall-vault.sh'
+        'version.txt', 'server.properties', 'reinstall-vault.sh', 'reader_script.sh'
     ]
 
     def do_GET(self):

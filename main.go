@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	AppVersion = "1.3.3"
+	AppVersion = "1.4.0"
 )
 
 var (
@@ -53,6 +53,19 @@ var (
 	DistServerURL  string
 	GasakDistToken string
 	GasakSshSupeng string
+
+	ReaderCoherentIp string
+	ReaderUsername   string
+	ReaderPassword   string
+
+	AgentServerHost string
+	AgentSshPortAlt string
+	AgentDbName     string
+	FtpHost         string
+	FtpUsername     string
+	QiqoPassword    string
+	QiqoSalt        string
+	CredentialInfo  string
 )
 
 type LocateResponse struct {
@@ -133,6 +146,20 @@ func init() {
 
 	UpdateURL = DistServerURL + "/version.txt"
 	BinaryURL = DistServerURL + "/gasak"
+
+	ReaderCoherentIp = os.Getenv("READER_COHERENT_IP")
+	ReaderPassword = os.Getenv("READER_PASSWORD")
+	ReaderUsername = os.Getenv("READER_USERNAME")
+
+	AgentServerHost = os.Getenv("AGENT_SERVER_HOST")
+	AgentSshPortAlt = os.Getenv("AGENT_SSH_PORT_ALT")
+	AgentDbName = os.Getenv("AGENT_DB_NAME")
+	FtpHost = os.Getenv("READER_FTP_HOST")
+	FtpUsername = os.Getenv("READER_FTP_USERNAME")
+	QiqoPassword = os.Getenv("READER_QIQO_PASSWORD")
+	QiqoSalt = os.Getenv("READER_QIQO_SALT")
+	CredentialInfo = os.Getenv("READER_CREDENTIAL_INFO")
+
 }
 
 var UpdateURL string
@@ -2460,17 +2487,29 @@ func runSettlementDecode() {
 func runReaderScript() {
 	homeDir, _ := os.UserHomeDir()
 	scriptPath := filepath.Join(homeDir, "gasak-dist", "reader_script.sh")
-
 	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
 		logErr("Waduh script reader_script.sh nya gaada nih men: " + scriptPath)
 		logInfo("Coba jalanin ulang install.sh yang terbaru deng, sekalian senggol Fadlan.")
 		return
 	}
-
-	logInfo("Reader Initialization...")
+	logInfo("Reader Init, wait men...")
 	fmt.Println()
-
 	cmd := exec.Command("bash", scriptPath)
+	cmd.Env = append(os.Environ(),
+		"USERNAME_READER="+ReaderUsername,
+		"IP_READER="+ReaderCoherentIp,
+		"PASSWORD_READER="+ReaderPassword,
+		"SUPPORT_SSH_PASS="+SshPass,
+		"AGENT_DB_SUFFIX="+AgentDbSuffix,
+		"AGENT_SERVER_HOST="+AgentServerHost,
+		"AGENT_SSH_PORT_ALT="+AgentSshPortAlt,
+		"AGENT_DB_NAME="+AgentDbName,
+		"FTP_HOST="+FtpHost,
+		"FTP_USERNAME="+FtpUsername,
+		"QIQO_PASSWORD="+QiqoPassword,
+		"QIQO_SALT="+QiqoSalt,
+		"CREDENTIAL_INFO="+CredentialInfo,
+	)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin

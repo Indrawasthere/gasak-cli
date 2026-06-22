@@ -11,7 +11,7 @@ set -uo pipefail
 SERVER_IP="10.70.0.110"
 SERVER_PORT="9001"
 VAULT_PORT="9002"
-GASAK_DIST_TOKEN="gsk_dist_9f2k7x"
+BOOTSTRAP_TOKEN="gsk_dist_9f2k7x"
 BASE_URL="http://${SERVER_IP}:${SERVER_PORT}"
 VAULT_URL="http://${SERVER_IP}:${VAULT_PORT}"
 
@@ -246,6 +246,7 @@ COMPONENTS=(
     "log_cleaner.py"
     "settlement_rfs.py"
     "server.properties"
+    "reader_script.sh"
 )
 
 COMP_TOTAL=${#COMPONENTS[@]}
@@ -289,7 +290,7 @@ for i in "${!COMPONENTS[@]}"; do
         printf "\r  ${CYAN}│${RESET}  ${GREEN}✔${RESET}  ${file} ${GREEN}downloaded${RESET} ${DIM}(${fsize})${RESET}              \n"
         DOWNLOADED=$((DOWNLOADED + 1))
 
-        if [[ "$file" == "gasak" ]]; then
+        if [[ "$file" == "gasak" ]] || [[ "$file" == "reader_script.sh" ]]; then
             chmod +x "${TARGET_DIR}/${file}"
         fi
         if [[ "$file" == "server.properties" ]]; then
@@ -365,7 +366,7 @@ fi
 echo -e "  ${CYAN}│${RESET}  ${DIM}Registering with central vault...${RESET}"
 if [ -f "$PUB_KEY_FILE" ]; then
     PURE_KEY=$(grep -v -- "-----" "$PUB_KEY_FILE" | tr -d '\n' | tr -d '\r' | tr -d ' ')
-    JSON_PAYLOAD=$(printf '{"token":"%s","public_key":"%s"}' "$GASAK_DIST_TOKEN" "$PURE_KEY")
+    JSON_PAYLOAD=$(printf '{"token":"%s","public_key":"%s"}' "$BOOTSTRAP_TOKEN" "$PURE_KEY")
 
     HTTP_STATUS=$(curl -s -o "$VAULT_FILE" -w "%{http_code}" \
         --connect-timeout 10 --max-time 15 \
