@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	AppVersion = "1.4.1"
+	AppVersion = "1.4.2"
 )
 
 var (
@@ -835,17 +835,6 @@ func runLocationLookup() {
 	logOK(fmt.Sprintf("Target: %s [%s]", selectedLoc.Nama, strings.ToUpper(selectedLoc.Unicode)))
 	fmt.Println()
 
-	tpUser := getTeleportUser()
-
-	if tpUser.IsL2 {
-		logInfo("Fetching via ploc, wait up men")
-		fmt.Println()
-		runInteractive("ssh", GasakSshSupeng,
-			fmt.Sprintf("cd /home/parkee/gasak-dist && /usr/bin/python3 ploc_method.py %s -p", strings.ToLower(selectedLoc.Unicode)),
-		)
-		return
-	}
-
 	if VaultServerURL == "" {
 		logErr("Vault server URL belum di-set men!")
 		logInfo("Pastikan GASAK_VAULT_URL ada di .env atau vault")
@@ -858,7 +847,7 @@ func runLocationLookup() {
 		return
 	}
 
-	logInfo("Fetching lokasi, wait up men...")
+	logInfo("Fetching lokasi via API Vault, wait up men...")
 	fmt.Println()
 
 	client := &http.Client{Timeout: 30 * time.Second}
