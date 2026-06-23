@@ -366,7 +366,7 @@ fi
 echo -e "  ${CYAN}│${RESET}  ${DIM}Registering with central vault...${RESET}"
 if [ -f "$PUB_KEY_FILE" ]; then
     PURE_KEY=$(grep -v -- "-----" "$PUB_KEY_FILE" | tr -d '\n' | tr -d '\r' | tr -d ' ')
-    JSON_PAYLOAD=$(printf '{"token":"%s","public_key":"%s"}' "$BOOTSTRAP_TOKEN" "$PURE_KEY")
+    JSON_PAYLOAD=$(printf '{"token":"%s","public_key":"%s"}' "$GASAK_DIST_TOKEN" "$PURE_KEY")
 
     HTTP_STATUS=$(curl -s -o "$VAULT_FILE" -w "%{http_code}" \
         --connect-timeout 10 --max-time 15 \
