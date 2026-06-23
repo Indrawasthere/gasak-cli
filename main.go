@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	AppVersion = "1.4.5"
+	AppVersion = "1.4.6"
 )
 
 var (

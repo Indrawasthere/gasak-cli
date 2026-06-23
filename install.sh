@@ -425,7 +425,7 @@ fi
 echo ""
 
 echo -e "  ${BOLD}${CYAN}Installed Components:${RESET}"
-for f in gasak decode_and_merge.py deploy_parkee.py log_cleaner.py settlement_rfs.py; do
+for f in gasak decode_and_merge.py deploy_parkee.py log_cleaner.py settlement_rfs.py reader_script.sh; do
     if [ -f "${INSTALL_DIR}/${f}" ]; then
         SIZE=$(du -sh "${INSTALL_DIR}/${f}" 2>/dev/null | cut -f1 || echo "?")
         echo -e "    ${GREEN}●${RESET} ${f}  ${DIM}(${SIZE})${RESET}"
