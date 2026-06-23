@@ -2,7 +2,7 @@
 
 SERVER_IP="10.70.0.110"
 VAULT_PORT="9002"
-GASAK_DIST_TOKEN="${GASAK_DIST_TOKEN:-}"
+GASAK_DIST_TOKEN="gsk_dist_9f2k7x"
 VAULT_URL="http://${SERVER_IP}:${VAULT_PORT}"
 
 REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "$USER")}"
@@ -38,6 +38,7 @@ HTTP_STATUS=$(curl -s -o "$VAULT_FILE" -w "%{http_code}" \
     -X POST \
     -H "Content-Type: application/json" \
     -H "X-Gasak-Host: ${DEVICE_HOST}" \
+    -H "X-Gasak-Token: ${GASAK_DIST_TOKEN}" \
     -d "$JSON_PAYLOAD" \
     "${VAULT_URL}/getenv")
 
