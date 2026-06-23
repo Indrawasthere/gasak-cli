@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	AppVersion = "1.4.2"
+	AppVersion = "1.4.5"
 )
 
 var (
@@ -463,7 +463,8 @@ func checkAndRunUpdate() {
 	serverVersion := strings.TrimSpace(string(serverVerBytes))
 
 	if serverVersion != "" && serverVersion != AppVersion {
-		fmt.Printf("\x1b[33m⚠ Versi baru ada nich (%s). Jalanin auto-update, tungguin men...\x1b[0m\n", serverVersion)
+		fmt.Printf("\x1b[33m\n⚠ Versi baru terdeteksi: %s (current: %s)\x1b[0m\n", serverVersion, AppVersion)
+		fmt.Printf("\x1b[36m  → Auto-update dimulai, tungguin men...\x1b[0m\n\n")
 
 		execPath, err := os.Executable()
 		if err != nil {
@@ -472,7 +473,7 @@ func checkAndRunUpdate() {
 
 		respBin, err := http.Get(BinaryURL)
 		if err != nil {
-			fmt.Println("\x1b[31m✘ Ini gagal men, help senggol Fadlan dah\x1b[0m")
+			fmt.Println("\x1b[31m✘ Download binary gagal men, help senggol Fadlan dah\x1b[0m")
 			time.Sleep(1 * time.Second)
 			return
 		}
@@ -488,7 +489,7 @@ func checkAndRunUpdate() {
 
 		_, err = io.Copy(out, respBin.Body)
 		if err == nil {
-			fmt.Println("\x1b[32m✔ Binary update, wait syncing script terbaru men...\x1b[0m")
+			fmt.Printf("\x1b[32m  ✔ Binary updated (%s)\x1b[0m\n", serverVersion)
 
 			distDir := filepath.Join(os.Getenv("HOME"), "gasak-dist")
 			scripts := []string{
@@ -497,10 +498,13 @@ func checkAndRunUpdate() {
 				"decode_and_merge.py",
 				"log_cleaner.py",
 				"install.sh",
+				"reader_script.sh",
 			}
 
 			baseURL := DistServerURL
 			hostname, _ := os.Hostname()
+			updated := 0
+			failed := 0
 
 			for _, s := range scripts {
 				url := baseURL + "/" + s
@@ -508,6 +512,7 @@ func checkAndRunUpdate() {
 
 				req, err := http.NewRequest("GET", url, nil)
 				if err != nil {
+					failed++
 					continue
 				}
 				req.Header.Set("X-Gasak-Host", hostname)
@@ -517,23 +522,30 @@ func checkAndRunUpdate() {
 				client := &http.Client{Timeout: 15 * time.Second}
 				resp, err := client.Do(req)
 				if err != nil {
+					failed++
 					continue
 				}
 
 				f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 				if err != nil {
 					resp.Body.Close()
+					failed++
 					continue
 				}
 
 				io.Copy(f, resp.Body)
 				f.Close()
 				resp.Body.Close()
-
-				fmt.Printf("\x1b[32m✔ %s updated\x1b[0m\n", s)
+				updated++
 			}
 
-			fmt.Println("\x1b[32m✔ DONE! GASAK udah berhasil di-update ke versi latest! Jalan lupa source zsh atau bash terus ketik gasak lagi men\x1b[0m")
+			fmt.Printf("\x1b[32m  ✔ Scripts synced: %d updated, %d failed\x1b[0m\n", updated, failed)
+			fmt.Println()
+			fmt.Println("\x1b[32m  ════════════════════════════════════════════════════\x1b[0m")
+			fmt.Printf("\x1b[32m  ✔ DONE! GASAK v%s ready to use\x1b[0m\n", serverVersion)
+			fmt.Println("\x1b[36m  → Ketik 'source ~/.zshrc' terus 'gasak' lagi men\x1b[0m")
+			fmt.Println("\x1b[32m  ════════════════════════════════════════════════════\x1b[0m")
+			fmt.Println()
 			os.Exit(0)
 		}
 	}
