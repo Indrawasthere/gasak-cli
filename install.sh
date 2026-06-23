@@ -373,6 +373,7 @@ if [ -f "$PUB_KEY_FILE" ]; then
         -X POST \
         -H "Content-Type: application/json" \
         -H "X-Gasak-Host: ${DEVICE_HOST}" \
+        -H "X-Gasak-Token: ${GASAK_DIST_TOKEN}" \
         -d "$JSON_PAYLOAD" \
         "${VAULT_URL}/getenv")
 
