@@ -30,6 +30,7 @@ PARKEE_SSH_PASS='REMOVED_PASSWORD'
 PARKEE_SSH_IP_LOCAL=$(grep -oP '^dbHost=\K.*' "$PARKEE_SER_PROP_PATH")
 PARKEE_SSH_SOURCE='/home/support'
 PARKEE_SSH_SERVER="${PARKEE_SSH_USER}@${PARKEE_SSH_IP_LOCAL}"
+PARKEE_SSH_OPT="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 #=====================================================================#
 #===========================local file / dir==========================#
 #=====================================================================#
@@ -512,6 +513,7 @@ update_reader() {
 		echo -e "====================================================="
 		echo -e "=====🔑CLEARING KNOWN_HOSTS FOR SERVER SOURCE🔑======"
 		echo -e "=====================================================\n"
+		ssh-keygen -f '/root/.ssh/known_hosts' -R "$PARKEE_SSH_IP_LOCAL"
 		sudo ssh-keygen -f '/root/.ssh/known_hosts' -R "$PARKEE_SSH_IP_LOCAL"
 		echo -e "✅ KNOWN_HOSTS CLEARED FOR $PARKEE_SSH_IP_LOCAL\n"
 	}
@@ -528,14 +530,15 @@ update_reader() {
 
 		# --- Cek & fetch FIRMWARE ---
 		echo -e "🔍 CHECK $FW_ZIP ON SERVER..."
-		if sshpass -p "${PARKEE_SSH_PASS}" ssh "${PARKEE_SSH_SERVER}" "[ -f ${PARKEE_SSH_SOURCE}/${FW_ZIP} ]"; then
+		#if sshpass -p "${PARKEE_SSH_PASS}" ssh "${PARKEE_SSH_SERVER}" "[ -f ${PARKEE_SSH_SOURCE}/${FW_ZIP} ]"; then
+		if sshpass -p "${PARKEE_SSH_PASS}" ssh ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" "[ -f ${PARKEE_SSH_SOURCE}/${FW_ZIP} ]"; then
 			echo -e "✅ $FW_ZIP ALREADY EXISTS ON SERVER\n"
 		else
 			echo -e "⚠️  $FW_ZIP NOT FOUND ON SERVER, FETCHING FROM API...\n"
 			echo -e "====================================================="
 			echo -e "======📥API DOWNLOAD $FW_ZIP TO SERVER📥============"
 			echo -e "=====================================================\n"
-			if sshpass -p "${PARKEE_SSH_PASS}" ssh "${PARKEE_SSH_SERVER}" \
+			if sshpass -p "${PARKEE_SSH_PASS}" ssh ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" \
 				"curl -f -o ${PARKEE_SSH_SOURCE}/${FW_ZIP} ${API_BASE}/${FW_ZIP}"; then
 				echo -e "====================================================="
 				echo -e "======✅API DOWNLOAD $FW_ZIP DONE✅================="
@@ -550,14 +553,15 @@ update_reader() {
 
 		# --- Cek & fetch SCRIPT ---
 		echo -e "🔍 CHECK $SCRIPT_ZIP ON SERVER..."
-		if sshpass -p "${PARKEE_SSH_PASS}" ssh "${PARKEE_SSH_SERVER}" "[ -f ${PARKEE_SSH_SOURCE}/${SCRIPT_ZIP} ]"; then
+		#if sshpass -p "${PARKEE_SSH_PASS}" ssh "${PARKEE_SSH_SERVER}" "[ -f ${PARKEE_SSH_SOURCE}/${SCRIPT_ZIP} ]"; then
+		if sshpass -p "${PARKEE_SSH_PASS}" ssh ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" "[ -f ${PARKEE_SSH_SOURCE}/${SCRIPT_ZIP} ]"; then
 			echo -e "✅ $SCRIPT_ZIP ALREADY EXISTS ON SERVER\n"
 		else
 			echo -e "⚠️  $SCRIPT_ZIP NOT FOUND ON SERVER, FETCHING FROM API...\n"
 			echo -e "====================================================="
 			echo -e "======📥API DOWNLOAD $SCRIPT_ZIP TO SERVER📥========"
 			echo -e "=====================================================\n"
-			if sshpass -p "${PARKEE_SSH_PASS}" ssh "${PARKEE_SSH_SERVER}" \
+			if sshpass -p "${PARKEE_SSH_PASS}" ssh ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" \
 				"curl -f -o ${PARKEE_SSH_SOURCE}/${SCRIPT_ZIP} ${API_BASE}/${SCRIPT_ZIP}"; then
 				echo -e "====================================================="
 				echo -e "======✅API DOWNLOAD $SCRIPT_ZIP DONE✅============="
@@ -582,7 +586,7 @@ update_reader() {
 		echo -e "====================================================="
 		echo -e "======📥SCP FIRMWARE v${FW_VERSION} FROM SERVER📥======="
 		echo -e "=====================================================\n"
-		if sshpass -p "${PARKEE_SSH_PASS}" scp "${PARKEE_SSH_SERVER}:${PARKEE_SSH_SOURCE}/${FW_ZIP}" "$DOWNLOAD_DIR/$FW_ZIP"; then
+		if sshpass -p "${PARKEE_SSH_PASS}" scp ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}:${PARKEE_SSH_SOURCE}/${FW_ZIP}" "$DOWNLOAD_DIR/$FW_ZIP"; then
 			echo -e "====================================================="
 			echo -e "=========✅SCP FIRMWARE v${FW_VERSION} DONE✅==========="
 			echo -e "=====================================================\n"
@@ -699,7 +703,7 @@ update_reader() {
 		echo -e "====================================================="
 		echo -e "==========📥SCP SCRIPT FROM SERVER📥================"
 		echo -e "=====================================================\n"
-		if sshpass -p "${PARKEE_SSH_PASS}" scp "${PARKEE_SSH_SERVER}:${PARKEE_SSH_SOURCE}/${SCRIPT_ZIP}" "$DOWNLOAD_DIR/$SCRIPT_ZIP"; then
+		if sshpass -p "${PARKEE_SSH_PASS}" scp ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}:${PARKEE_SSH_SOURCE}/${SCRIPT_ZIP}" "$DOWNLOAD_DIR/$SCRIPT_ZIP"; then
 			echo -e "====================================================="
 			echo -e "=========✅SCP SCRIPT FROM SERVER DONE✅============="
 			echo -e "=====================================================\n"
@@ -861,14 +865,14 @@ update_reader() {
 		echo -e "=====================================================\n"
 
 		echo -e "🔄DELETE $FW_ZIP ON SERVER🔄"
-		if sshpass -p "${PARKEE_SSH_PASS}" ssh "${PARKEE_SSH_SERVER}" "rm -f ${PARKEE_SSH_SOURCE}/${FW_ZIP}"; then
+		if sshpass -p "${PARKEE_SSH_PASS}" ssh ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" "rm -f ${PARKEE_SSH_SOURCE}/${FW_ZIP}"; then
 			echo -e "✅DELETE $FW_ZIP ON SERVER DONE✅\n"
 		else
 			echo -e "⚠️FAILED DELETE $FW_ZIP ON SERVER, SKIP...⚠️\n"
 		fi
 
 		echo -e "🔄DELETE $SCRIPT_ZIP ON SERVER🔄"
-		if sshpass -p "${PARKEE_SSH_PASS}" ssh "${PARKEE_SSH_SERVER}" "rm -f ${PARKEE_SSH_SOURCE}/${SCRIPT_ZIP}"; then
+		if sshpass -p "${PARKEE_SSH_PASS}" ssh ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" "rm -f ${PARKEE_SSH_SOURCE}/${SCRIPT_ZIP}"; then
 			echo -e "✅DELETE $SCRIPT_ZIP ON SERVER DONE✅\n"
 		else
 			echo -e "⚠️FAILED DELETE $SCRIPT_ZIP ON SERVER, SKIP...⚠️\n"
