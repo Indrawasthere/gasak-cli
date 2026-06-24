@@ -849,7 +849,7 @@ copy_script_v19(){
 }
 
 config_PSAM(){
-   #new_reader_v19
+   new_reader_v14
    echo -e "\n====================================================\n"
    echo -e "\nPastikan Semua PSAM sudah terpasang\n"
 	read -p "INPUT DEVICE NAME: " DEVICE_NAME

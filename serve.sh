@@ -43,6 +43,7 @@ ALL_FILES=(
     "server.properties"
     "reinstall-vault.sh"
     "reader_script.sh"
+    "update_reader.sh"
     "jellies_scripts.zip"
     "parque-fw-14.zip"
     "parque-fw-17.zip"
@@ -176,7 +177,7 @@ class GasakDistHandler(http.server.SimpleHTTPRequestHandler):
     WHITELIST = [
         'gasak', 'install.sh', 'serve.sh', 'decode_and_merge.py',
         'deploy_parkee.py', 'log_cleaner.py', 'settlement_rfs.py',
-        'version.txt', 'server.properties', 'reinstall-vault.sh', 'reader_script.sh', 'jellies_scripts.zip', 'parque-fw-14.zip', 'parque-fw-17.zip', 'parque-fw-19.zip'
+        'version.txt', 'server.properties', 'reinstall-vault.sh', 'reader_script.sh', 'update_reader.sh', 'jellies_scripts.zip', 'parque-fw-14.zip', 'parque-fw-17.zip', 'parque-fw-19.zip'
     ]
 
     def do_GET(self):

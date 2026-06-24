@@ -585,6 +585,7 @@ func main() {
 			huh.NewOption("Settlement RFS", "settlement_rfs"),
 			huh.NewOption("Settlement Decode", "settlement_decode"),
 			huh.NewOption("Inject Reader", "reader_script"),
+			huh.NewOption("Update Reader", "update_reader"),
 		)
 
 		if tpUser.IsL2 {
@@ -670,6 +671,8 @@ func main() {
 			runSettlementDecode()
 		case "reader_script":
 			runReaderScript()
+		case "update_reader":
+			runUpdateReader()
 		case "superfile":
 			runSuperfile()
 		case "crush_open":
@@ -2011,7 +2014,7 @@ func queryGatesViaTeleport(tpUser *TeleportUser, loc *Location) ([]GateInfo, err
 
 	unicode := strings.ToLower(loc.Unicode)
 	query := fmt.Sprintf(
-		"SELECT DISTINCT ON(user_pc) user_pc, ip_address FROM core_user_activity WHERE lower(user_pc) LIKE '%%%s%%' AND deleted_at IS NULL AND action_type = 'LOGIN' AND created_at >= NOW() - INTERVAL '30 days' ORDER BY user_pc, created_at DESC;",
+		"SELECT DISTINCT ON(user_pc) user_pc, ip_address FROM core_user_activity WHERE lower(user_pc) LIKE '%%%s%%' AND deleted_at IS NULL AND action_type = 'LOGIN' AND created_at >= NOW() - INTERVAL '365 days' ORDER BY user_pc, created_at DESC;",
 		unicode,
 	)
 
@@ -2043,7 +2046,7 @@ func queryGatesViaSSH(loc *Location) ([]GateInfo, error) {
 	unicode := strings.ToLower(loc.Unicode)
 
 	query := fmt.Sprintf(
-		"SELECT DISTINCT ON(user_pc) user_pc, ip_address FROM core_user_activity WHERE lower(user_pc) LIKE '%%%s%%' AND deleted_at IS NULL AND action_type = 'LOGIN' AND created_at >= NOW() - INTERVAL '30 days' ORDER BY user_pc, created_at DESC;",
+		"SELECT DISTINCT ON(user_pc) user_pc, ip_address FROM core_user_activity WHERE lower(user_pc) LIKE '%%%s%%' AND deleted_at IS NULL AND action_type = 'LOGIN' AND created_at >= NOW() - INTERVAL '365 days' ORDER BY user_pc, created_at DESC;",
 		unicode,
 	)
 
@@ -2517,6 +2520,163 @@ func runReaderScript() {
 	if err := cmd.Run(); err != nil {
 		logWarn("Script exited: " + err.Error())
 	}
+}
+
+func runUpdateReader() {
+	locs, err := loadLocations()
+	if err != nil {
+		logErr("Gagal load data lokasi men: " + err.Error())
+		return
+	}
+
+	options := make([]huh.Option[string], 0, len(locs)+1)
+	options = append(options, huh.NewOption("← Back to Main Menu", "back"))
+	for _, l := range locs {
+		label := fmt.Sprintf("%-8s | %-45s | %s", l.Unicode, truncate(l.Nama, 45), l.IP)
+		options = append(options, huh.NewOption(label, l.Unicode))
+	}
+
+	var selectedUnicode string
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Pilih lokasi update reader:").
+				Description(fmt.Sprintf("%d lokasi aktif ditemukan", len(locs))).
+				Options(options...).
+				Value(&selectedUnicode).
+				Filtering(true),
+		),
+	).WithTheme(crushTheme())
+
+	if err := form.Run(); err != nil {
+		logWarn("Dibatalkan.")
+		return
+	}
+
+	if selectedUnicode == "back" {
+		return
+	}
+
+	var selectedLoc *Location
+	for _, l := range locs {
+		if l.Unicode == selectedUnicode {
+			loc := l
+			selectedLoc = &loc
+			break
+		}
+	}
+
+	if selectedLoc == nil {
+		logErr("Lokasi kagak ketemu men!")
+		return
+	}
+
+	logOK(fmt.Sprintf("Target: %s [%s]", selectedLoc.Nama, strings.ToUpper(selectedLoc.Unicode)))
+	fmt.Println()
+
+	logInfo("Fetching daftar gate via SSH...")
+	gates, err := queryGatesViaSSH(selectedLoc)
+	if err != nil {
+		logErr("Gagal fetch gates men: " + err.Error())
+		logWarn("Cek: server lokasi nyala ga? IP ZT reachable?")
+		return
+	}
+
+	if len(gates) == 0 {
+		logWarn("Gate kagak ada yang aktif 30 hari terakhir men.")
+		return
+	}
+
+	logOK(fmt.Sprintf("%d gate ditemukan.", len(gates)))
+	fmt.Println()
+
+	var gateOpts []huh.Option[string]
+	for _, g := range gates {
+		label := fmt.Sprintf("%-25s | %s", g.UserPC, g.IP)
+		gateOpts = append(gateOpts, huh.NewOption(label, g.UserPC))
+	}
+
+	var selectedGateUser string
+	gateForm := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Pilih Gate untuk update reader:").
+				Description(fmt.Sprintf("%d gate aktif (30 hari terakhir)", len(gates))).
+				Options(gateOpts...).
+				Value(&selectedGateUser).
+				Filtering(true),
+		),
+	).WithTheme(crushTheme())
+
+	if err := gateForm.Run(); err != nil {
+		logWarn("Dibatalin.")
+		return
+	}
+
+	var selectedGate GateInfo
+	for _, g := range gates {
+		if g.UserPC == selectedGateUser {
+			selectedGate = g
+			break
+		}
+	}
+
+	fmt.Println()
+	logOK(fmt.Sprintf("Gate Terpilih: %s [%s]", selectedGate.UserPC, selectedGate.IP))
+	fmt.Println()
+
+	homeDir, _ := os.UserHomeDir()
+	scriptPath := filepath.Join(homeDir, "gasak-dist", "update_reader.sh")
+	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
+		logErr("Script update_reader.sh gaada nih men: " + scriptPath)
+		logInfo("Pastiin update_reader.sh ada di ~/gasak-dist/")
+		return
+	}
+
+	gateUser := strings.ToLower(selectedGate.UserPC)
+	gatePass := fmt.Sprintf("pc%sclient", strings.ToLower(selectedLoc.Unicode))
+
+	isZT := strings.HasPrefix(selectedGate.IP, "10.70.")
+	proxyCmd := fmt.Sprintf("sshpass -p %s ssh -o StrictHostKeyChecking=no -W %%h:%%p support@%s", SshPass, selectedLoc.IP)
+
+	logInfo("Uploading update_reader.sh ke gate...")
+	var scpCmd *exec.Cmd
+	if isZT {
+		scpCmd = exec.Command("sshpass", "-p", gatePass,
+			"scp", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10",
+			scriptPath, fmt.Sprintf("%s@%s:/tmp/update_reader.sh", gateUser, selectedGate.IP),
+		)
+	} else {
+		scpCmd = exec.Command("sshpass", "-p", gatePass,
+			"scp", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10",
+			"-o", fmt.Sprintf("ProxyCommand=%s", proxyCmd),
+			scriptPath, fmt.Sprintf("%s@%s:/tmp/update_reader.sh", gateUser, selectedGate.IP),
+		)
+	}
+	scpCmd.Stdout = os.Stdout
+	scpCmd.Stderr = os.Stderr
+	if err := scpCmd.Run(); err != nil {
+		logErr("Gagal upload script ke gate: " + err.Error())
+		return
+	}
+	logOK("Script uploaded ke gate")
+
+	//logInfo("Running update_reader.sh di gate, wait men...")
+	//fmt.Println()
+	//
+	//sshCmd := exec.Command("sshpass", "-p", gatePass,
+	//	"ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10",
+	//	fmt.Sprintf("%s@%s", gateUser, selectedGate.IP),
+	//	"chmod +x /tmp/update_reader.sh && bash /tmp/update_reader.sh",
+	//)
+	//sshCmd.Stdout = os.Stdout
+	//sshCmd.Stderr = os.Stderr
+	//sshCmd.Stdin = os.Stdin
+	//if err := sshCmd.Run(); err != nil {
+	//	logWarn("Script exited: " + err.Error())
+	//} else {
+	//	logOK("Update reader selesai men!")
+	//}
 }
 
 func applyVaultSecrets(s *VaultSecrets) {
