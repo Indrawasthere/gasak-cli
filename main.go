@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	AppVersion = "1.5.0"
+	AppVersion = "1.5.1"
 )
 
 var (
@@ -2635,22 +2635,21 @@ func runUpdateReader() {
 
 	gateUser := strings.ToLower(selectedGate.UserPC)
 	gatePass := fmt.Sprintf("pc%sclient", strings.ToLower(selectedLoc.Unicode))
-
-	isZT := strings.HasPrefix(selectedGate.IP, "10.70.")
 	proxyCmd := fmt.Sprintf("sshpass -p %s ssh -o StrictHostKeyChecking=no -W %%h:%%p support@%s", SshPass, selectedLoc.IP)
+	isZT := strings.HasPrefix(selectedGate.IP, "10.70.")
 
 	logInfo("Uploading update_reader.sh ke gate...")
 	var scpCmd *exec.Cmd
 	if isZT {
 		scpCmd = exec.Command("sshpass", "-p", gatePass,
-			"scp", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10",
-			scriptPath, fmt.Sprintf("%s@%s:/tmp/update_reader.sh", gateUser, selectedGate.IP),
+			"scp", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=30",
+			scriptPath, fmt.Sprintf("%s@%s:~/update_reader.sh", gateUser, selectedGate.IP),
 		)
 	} else {
 		scpCmd = exec.Command("sshpass", "-p", gatePass,
-			"scp", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10",
+			"scp", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=30",
 			"-o", fmt.Sprintf("ProxyCommand=%s", proxyCmd),
-			scriptPath, fmt.Sprintf("%s@%s:/tmp/update_reader.sh", gateUser, selectedGate.IP),
+			scriptPath, fmt.Sprintf("%s@%s:~/update_reader.sh", gateUser, selectedGate.IP),
 		)
 	}
 	scpCmd.Stdout = os.Stdout
@@ -2661,22 +2660,36 @@ func runUpdateReader() {
 	}
 	logOK("Script uploaded ke gate")
 
-	//logInfo("Running update_reader.sh di gate, wait men...")
-	//fmt.Println()
-	//
-	//sshCmd := exec.Command("sshpass", "-p", gatePass,
-	//	"ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10",
-	//	fmt.Sprintf("%s@%s", gateUser, selectedGate.IP),
-	//	"chmod +x /tmp/update_reader.sh && bash /tmp/update_reader.sh",
-	//)
-	//sshCmd.Stdout = os.Stdout
-	//sshCmd.Stderr = os.Stderr
-	//sshCmd.Stdin = os.Stdin
-	//if err := sshCmd.Run(); err != nil {
-	//	logWarn("Script exited: " + err.Error())
-	//} else {
-	//	logOK("Update reader selesai men!")
-	//}
+	logInfo("Running update_reader.sh di gate, wait men...")
+	fmt.Println()
+
+	remoteCmd := "chmod +x ~/update_reader.sh && bash ~/update_reader.sh"
+
+	var sshCmd *exec.Cmd
+	if isZT {
+		sshCmd = exec.Command("sshpass", "-p", gatePass,
+			"ssh", "-t", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=30", // Tambahkan flag -t disini
+			fmt.Sprintf("%s@%s", gateUser, selectedGate.IP),
+			remoteCmd,
+		)
+	} else {
+		sshCmd = exec.Command("sshpass", "-p", gatePass,
+			"ssh", "-t", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=30", // Tambahkan flag -t disini
+			"-o", fmt.Sprintf("ProxyCommand=%s", proxyCmd),
+			fmt.Sprintf("%s@%s", gateUser, selectedGate.IP),
+			remoteCmd,
+		)
+	}
+
+	sshCmd.Stdout = os.Stdout
+	sshCmd.Stderr = os.Stderr
+	sshCmd.Stdin = os.Stdin
+
+	if err := sshCmd.Run(); err != nil {
+		logWarn("Script exited: " + err.Error())
+	} else {
+		logOK("Update reader selesai men!")
+	}
 }
 
 func applyVaultSecrets(s *VaultSecrets) {
