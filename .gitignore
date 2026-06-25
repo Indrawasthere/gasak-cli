@@ -32,3 +32,33 @@ gasak
 
 # Backup
 main-backup.go
+
+# Secrets
+secrets.txt
+ploc/service_account.json
+*.env
+
+# Binary / Zip
+*.zip
+gasak
+
+# Logs
+*.log
+cutting-logs/
+
+# Python cache
+__pycache__/
+*.pyc
+
+
+# folder
+ploc/
+quality-assurance/
+reader/
+settlement/
+vault/
+vmon/
+windows-version/
+.mimocode/
+agent/
+firmware/
