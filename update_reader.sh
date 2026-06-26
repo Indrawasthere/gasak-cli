@@ -4,9 +4,9 @@
 #=======================variable update_reader()======================#
 #=====================================================================#
 #init reader
-READER_USERNAME="root"
+USERNAME_READER="root"
 READER_COHERENT_IP="192.168.1.199"
-SSH_READER="$READER_USERNAME@$READER_COHERENT_IP"
+SSH_READER="$USERNAME_READER@$READER_COHERENT_IP"
 PASSWORD_READER="TRAN5act10n+953"
 
 NEW_IP="192.168.1.200/24"
@@ -15,21 +15,19 @@ IP_GATEWAY="192.168.1.1"
 #=====================================================================#
 #=============================download file===========================#
 #=====================================================================#
-# Firmware version options: 14 (Latest), 17, 19
-# FW_ZIP ditentukan saat runtime berdasarkan pilihan versi user
+# FW_ZIP ditentukan saat runtime berdasarkan input versi user
 SCRIPT_NAME='jellies_scripts'
 SCRIPT_ZIP="${SCRIPT_NAME}.zip"
 #=====================================================================#
 #===========================server source=============================#
 #=====================================================================#
 PARKEE_FOLDER='/opt/app/agent/parkee-agent'
-PARKEE_SER_PROP_FILE='server.properties'
-PARKEE_SER_PROP_PATH="${PARKEE_FOLDER}/${PARKEE_SER_PROP_FILE}"
+PARKEE_SSH_PROP="${PARKEE_FOLDER}/server.properties"
 PARKEE_SSH_USER='support'
-PARKEE_SSH_PASS='REMOVED_PASSWORD'
-PARKEE_SSH_IP_LOCAL=$(grep -oP '^dbHost=\K.*' "$PARKEE_SER_PROP_PATH")
+PARKEE_SSH_PASS='support545115'
+PARKEE_SSH_IP=$(grep -oP '^dbHost=\K.*' "$PARKEE_SSH_PROP")
 PARKEE_SSH_SOURCE='/home/support'
-PARKEE_SSH_SERVER="${PARKEE_SSH_USER}@${PARKEE_SSH_IP_LOCAL}"
+PARKEE_SSH_SERVER="${PARKEE_SSH_USER}@${PARKEE_SSH_IP}"
 PARKEE_SSH_OPT="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 #=====================================================================#
 #===========================local file / dir==========================#
@@ -42,10 +40,10 @@ SSH_KEY_PATH="$HOME/.ssh/id_rsa"
 #==========================reader file/folder=========================#
 #=====================================================================#
 DIR_BIN='/apps/parque/bin'
-FILE_FIRMWARE='parque'
+FILE_FIRMWARE='parque' 
 PATH_FILE_FIRMWARE=$DIR_BIN/$FILE_FIRMWARE
 
-FILE_UI='uimedia'
+FILE_UI='uimedia' 
 PATH_FILE_UI=$DIR_BIN/$FILE_UI
 
 DIR_cronjob_reader='/apps/etc/cronjobs'
@@ -95,7 +93,7 @@ cek_ip() {
 
 	# Cek apakah NIC memiliki profil koneksi yang aktif
 	connection_name=$(nmcli -t -f DEVICE,CONNECTION device status | grep "^$nic:" | cut -d':' -f2)
-
+	 
 	if [[ -z "$connection_name" ||"$connection_name" == "--" ]]; then
 		ip_method="-"
 	else
@@ -114,7 +112,7 @@ cek_ip() {
 	gateway=$(nmcli -t -f IP4.GATEWAY device show "$nic" | cut -d':' -f2)
 	[[ -z "$gateway" ]] && gateway="-"
 	printf "🔸 %-12s : %s\n" "Gateway" "$gateway"
-
+	 
 	dns=$(nmcli -t -f IP4.DNS device show "$nic" | cut -d':' -f2 | paste -sd ", ")
 	[[ -z "$dns" ]] && dns="-"
 	printf "🔸 %-12s : %s\n" "dns" "$dns"
@@ -199,14 +197,19 @@ ubah_ip() {
 bypass_reader() {
 clear
 if ! command sshpass &> /dev/null; then
-sudo apt update && sudo apt install sshpass -y
+	sudo sed -i 's|http://id.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list
+	sudo sed -i 's|^\([^#]\)|#\1|' /etc/apt/sources.list.d/anydesk-stable.list 
+	sudo sed -i 's|^\([^#]\)|#\1|' /etc/apt/sources.list.d/bellsoft.list 
+	sudo sed -i 's|^\([^#]\)|#\1|' /etc/apt/sources.list.d/archive_uri-https_dl_winehq_org_wine-builds_ubuntu_-jammy.list
+	sudo apt update 
+	sudo apt install sshpass -y
 fi
 
 sudo chown -R $USER:$GROUP $HOME/.ssh
 
 #cd $HOME/.ssh
 #if [ ! -f "$SSH_KEY_PATH" ]; then
-#rm -f "$SSH_KEY_PATH"
+#rm -f "$SSH_KEY_PATH" 
 #rm -f "$SSH_KEY_PATH.pub"
 #fi
 
@@ -214,7 +217,7 @@ ssh-keygen -t rsa -b 4096 -f "$SSH_KEY_PATH" -N ""
 sshpass -p "${PASSWORD_READER}" ssh-copy-id -o StrictHostKeyChecking=no "${SSH_READER}"
 
 cd $HOME/
-
+	
 }
 
 
@@ -275,7 +278,7 @@ serial_dev() {
 		echo -e "❌CONFIGURATION FILE $PATH_DEV_PROP NOT FOUND!!!!!!"
 		return 1
 	fi
-
+	
 	echo -e "\n===================================================\n"
 	echo -e "🔍SHOWING THE CURRENT CONFIGURATION:"
 	cat "$PATH_DEV_PROP" | grep -E "^wuzz.reader.standby.mode="
@@ -301,7 +304,7 @@ serial_dev() {
 	echo -e "🔎DETECT AVAILABLE SERIAL PORTS"
 
 	serial_ports=$(sudo dmesg | grep 'tty' | grep -o 'tty[A-Za-z0-9]*' | sort -u)
-
+	
 	if [[ -z "$serial_ports" ]]; then
 		echo -e "⚠️NO SERIAL PORTS FOUND. MAKE SURE PCI-E IS PROPERLY INSTALLED⚠️"
 		read -p "DO YOU WANT TO SHUTDOWN NOW? (y/n): " shutdown_confirm
@@ -323,7 +326,7 @@ serial_dev() {
 
 		echo -e "\n===================================================\n"
 	fi
-
+   
 	# ===============================
 	# OLD INPUT METHOD (DIKOMEN SAJA)
 	# ===============================
@@ -416,7 +419,7 @@ serial_dev() {
 	sudo sed -i -E "s|^(wuzz.reader.standby.mode=).*|\1STANDBY_MODE_READER|" "$PATH_DEV_PROP"
 	sudo sed -i -E "s|^barcode.debounce=.*|barcode.debounce=600|" "$PATH_DEV_PROP"
 	sudo sed -i -E "s|^suggestion.debounce=.*|suggestion.debounce=600|" "$PATH_DEV_PROP"
-
+	
 	#echo -e "==========DEPLOY LIVE LOG READER PARKEE==========="
 	#if ! grep 'alias parkee-reader-log=' "$HOME/.zshrc"; then
 	#	echo 'alias parkee-reader-log="ssh root@192.168.1.199 \"tail -f -n 10000 /media/mmc/\\\$(ls -t /media/mmc/ | head -n 1)\""' | tee -a "$HOME/.zshrc"
@@ -453,8 +456,8 @@ serial_dev() {
 	if [[ $restart_confirm == "y" ]]; then
 		sudo systemctl restart "$service_name"
 		sleep 2
-		systemctl is-active --quiet "$service_name"
-		echo -e "✅SERVICE SUCCESSFULLY RESTARTED" || echo -e "❌FAILED TO RESTART SERVICE"
+		systemctl is-active --quiet "$service_name" 
+		echo -e "✅SERVICE SUCCESSFULLY RESTARTED" || echo -e "❌FAILED TO RESTART SERVICE" 
 		clear
 	else
 		echo -e "🔙BACK TO MAIN MENU"
@@ -467,29 +470,36 @@ update_reader() {
 	clear
 
 	# ===================================================================
-	# Pilih versi firmware
+	# Input versi firmware — full string termasuk hash
+	# Contoh: v1.00.14-f577de6e5 → FW_ZIP=v1.00.14-f577de6e5.zip
+	# FW_VERSION diekstrak untuk logic crontab (!= 14)
 	# ===================================================================
 	pilih_versi_fw(){
 		clear
 		echo -e "====================================================="
 		echo -e "===========📦SELECT FIRMWARE VERSION📦=============="
 		echo -e "====================================================="
-		echo -e "1) Version 14 (Latest)"
-		echo -e "2) Version 17"
-		echo -e "3) Version 19"
+		echo -e "Ketik nama versi lengkap sesuai file di server."
+		echo -e "Contoh: v1.00.14-f577de6e5"
+		echo -e "        v1.00.17-905e5f60e"
+		echo -e "        v1.00.19-625929d22"
 		echo -e "====================================================="
 		while true; do
-			read -p "INPUT pilihan versi (1-3): " pilihan_versi
-			case $pilihan_versi in
-				1) FW_VERSION="14" ; break ;;
-				2) FW_VERSION="17" ; break ;;
-				3) FW_VERSION="19" ; break ;;
-				*) echo -e "❌ Pilihan tidak valid, coba lagi." ;;
-			esac
+			read -p "INPUT versi firmware: " input_versi
+
+			# Validasi format: v1.00.XX atau v1.00.XX-hash
+			if [[ "$input_versi" =~ ^v[0-9]+\.[0-9]+\.([0-9]+)(-[a-zA-Z0-9]+)?$ ]]; then
+				FW_VERSION="${BASH_REMATCH[1]}"
+				FW_ZIP="parque-${input_versi}.zip"
+				break
+			else
+				echo -e "❌ Format tidak valid. Gunakan format: v1.00.14 atau v1.00.14-f577de6e5"
+			fi
 		done
-		FW_ZIP="parque-fw-${FW_VERSION}.zip"
 		echo -e "====================================================="
-		echo -e "✅ SELECTED FIRMWARE VERSION: $FW_VERSION ($FW_ZIP)"
+		echo -e "✅ FIRMWARE : $input_versi"
+		echo -e "✅ FILE     : $FW_ZIP"
+		echo -e "✅ VERSION  : $FW_VERSION (untuk logic crontab)"
 		echo -e "=====================================================\n"
 	}
 
@@ -498,7 +508,10 @@ update_reader() {
 	# ===================================================================
 	bypass_script(){
 		if ! command -v sshpass &> /dev/null; then
-			sudo apt update && sudo apt install sshpass -y
+			sudo sed -i 's|http://id.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list
+			sudo sed -i 's|^\([^#]\)|#\1|' /etc/apt/sources.list.d/anydesk-stable.list 
+			sudo sed -i 's|^\([^#]\)|#\1|' /etc/apt/sources.list.d/bellsoft.list 
+			sudo sed -i 's|^\([^#]\)|#\1|' /etc/apt/sources.list.d/archive_uri-https_dl_winehq_org_wine-builds_ubuntu_-jammy.list
 		fi
 		sudo chown -R $USER:$GROUP $HOME/.ssh
 		ssh-keygen -t rsa -b 4096 -f "$SSH_KEY_PATH" -N ""
@@ -513,9 +526,9 @@ update_reader() {
 		echo -e "====================================================="
 		echo -e "=====🔑CLEARING KNOWN_HOSTS FOR SERVER SOURCE🔑======"
 		echo -e "=====================================================\n"
-		ssh-keygen -f '/root/.ssh/known_hosts' -R "$PARKEE_SSH_IP_LOCAL"
-		sudo ssh-keygen -f '/root/.ssh/known_hosts' -R "$PARKEE_SSH_IP_LOCAL"
-		echo -e "✅ KNOWN_HOSTS CLEARED FOR $PARKEE_SSH_IP_LOCAL\n"
+		ssh-keygen -f "$HOME/.ssh/known_hosts" -R "$PARKEE_SSH_IP"
+		sudo ssh-keygen -f '/root/.ssh/known_hosts' -R "$PARKEE_SSH_IP"
+		echo -e "✅ KNOWN_HOSTS CLEARED FOR $PARKEE_SSH_IP\n"
 	}
 
 	# ===================================================================
@@ -528,7 +541,7 @@ update_reader() {
 		echo -e "=======🔍CHECKING FILES AVAILABILITY ON SERVER======="
 		echo -e "=====================================================\n"
 
-		# --- Cek & fetch FIRMWARE ---
+		# --- FIRMWARE ---
 		echo -e "🔍 CHECK $FW_ZIP ON SERVER..."
 		#if sshpass -p "${PARKEE_SSH_PASS}" ssh "${PARKEE_SSH_SERVER}" "[ -f ${PARKEE_SSH_SOURCE}/${FW_ZIP} ]"; then
 		if sshpass -p "${PARKEE_SSH_PASS}" ssh ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" "[ -f ${PARKEE_SSH_SOURCE}/${FW_ZIP} ]"; then
@@ -865,14 +878,20 @@ update_reader() {
 		echo -e "=====================================================\n"
 
 		echo -e "🔄DELETE $FW_ZIP ON SERVER🔄"
-		if sshpass -p "${PARKEE_SSH_PASS}" ssh ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" "rm -f ${PARKEE_SSH_SOURCE}/${FW_ZIP}"; then
+		sshpass -p "${PARKEE_SSH_PASS}" ssh ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" <<EOF 2>/dev/null
+rm ${PARKEE_SSH_SOURCE}/${FW_ZIP}
+EOF
+		if [ $? -eq 0 ]; then
 			echo -e "✅DELETE $FW_ZIP ON SERVER DONE✅\n"
 		else
 			echo -e "⚠️FAILED DELETE $FW_ZIP ON SERVER, SKIP...⚠️\n"
 		fi
 
 		echo -e "🔄DELETE $SCRIPT_ZIP ON SERVER🔄"
-		if sshpass -p "${PARKEE_SSH_PASS}" ssh ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" "rm -f ${PARKEE_SSH_SOURCE}/${SCRIPT_ZIP}"; then
+		sshpass -p "${PARKEE_SSH_PASS}" sftp ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" <<EOF 2>/dev/null
+rm ${PARKEE_SSH_SOURCE}/${SCRIPT_ZIP}
+EOF
+		if [ $? -eq 0 ]; then
 			echo -e "✅DELETE $SCRIPT_ZIP ON SERVER DONE✅\n"
 		else
 			echo -e "⚠️FAILED DELETE $SCRIPT_ZIP ON SERVER, SKIP...⚠️\n"
@@ -1014,12 +1033,12 @@ EOF
 		update_script
 		crontab_reader
 
-		# Crontab client pkill uimedia — khusus v17 dan v19
-		if [[ "$FW_VERSION" == "17" || "$FW_VERSION" == "19" ]]; then
+		# Crontab client pkill uimedia — semua versi kecuali v14
+		if [[ "$FW_VERSION" != "14" ]]; then
 			crontab_client_uimedia
 		fi
 
-		#erase_server
+		erase_server
 		erase_local
 		end
 
@@ -1049,10 +1068,10 @@ else
 echo -e "===========⚠️ LOG FILE READER NOT FOUND⚠️============"
 echo -e "=====================================================\n"
 	fi
-
+	
 	echo -e "====================================================="
 	echo -e "===========🔍GET PARKEE READER VERSION🔍============"
-	if ssh "$SSH_READER" 'ls /media/mmc/reader-log-*.log 1>/dev/null 2>&1'; then
+	if ssh "$SSH_READER" 'ls /media/mmc/reader-log-*.log 1>/dev/null 2>&1'; then	
 	if ! ssh "$SSH_READER" 'head -n 90 "$(ls -t /media/mmc | head -n 1 | sed "s|^|/media/mmc/|")" | tail -n 6'; then
 		echo -e "========❌FAILED GET PARKEE READER VERSION❌========"
 		echo -e "=====================================================\n"
@@ -1074,11 +1093,11 @@ echo -e "=====================================================\n"
 		echo -e "=========✅GET PARKEE AGENT VERSION DONE✅=========="
 		echo -e "=====================================================\n"
 	fi
-
+	
 	ssh $SSH_READER "cat $PATH_FILE_PSAM_config"
 }
 
-psam_dki(){
+psam_dki(){	
 	clear
 	# Fungsi untuk menginstal PSAM DKI (menambahkan atau memperbarui konfigurasi DKI)
 	install_psam_dki() {
@@ -1098,21 +1117,21 @@ psam_dki(){
 		if ssh $SSH_READER "grep -q '^\[DKI\]' $PATH_FILE_PSAM_config"; then
 		echo -e "📌PSAM [DKI] IS ACTIVE, ONLY UPDATE MID, TID, BATCH, AND SLOT📌"
 		ssh $SSH_READER <<EOF
-		sed -i '/^\[DKI\]/,/^\[/{
-		s|^MID=.*|MID=$NEW_MID_DKI|;
-		s|^TID=.*|TID=$NEW_TID_DKI|;
-		s|^BATCH=.*|BATCH=$NEW_BATCH_DKI|;
-		s|^slot=.*|slot=$NEW_SLOT_DKI|
+		sed -i '/^\[DKI\]/,/^\[/{ 
+		s|^MID=.*|MID=$NEW_MID_DKI|; 
+		s|^TID=.*|TID=$NEW_TID_DKI|; 
+		s|^BATCH=.*|BATCH=$NEW_BATCH_DKI|; 
+		s|^slot=.*|slot=$NEW_SLOT_DKI| 
 		}' $PATH_FILE_PSAM_config
 EOF
 	else
 		echo -e "📌PSAM [DKI] IS NOT ACTIVE YET, ACTIVATE IT FIRST📌"
 		ssh $SSH_READER <<EOF
-		sed -i '/^\#\[DKI\]/,/^\[/{
-		s|^\#MID=.*|MID=$NEW_MID_DKI|;
-		s|^\#TID=.*|TID=$NEW_TID_DKI|;
-		s|^\#BATCH=.*|BATCH=$NEW_BATCH_DKI|;
-		s|^\#slot=.*|slot=$NEW_SLOT_DKI|
+		sed -i '/^\#\[DKI\]/,/^\[/{ 
+		s|^\#MID=.*|MID=$NEW_MID_DKI|; 
+		s|^\#TID=.*|TID=$NEW_TID_DKI|; 
+		s|^\#BATCH=.*|BATCH=$NEW_BATCH_DKI|; 
+		s|^\#slot=.*|slot=$NEW_SLOT_DKI| 
 		}' $PATH_FILE_PSAM_config
 		sed -i 's/^\#\[DKI\]/\[DKI\]/' $PATH_FILE_PSAM_config
 EOF
@@ -1212,7 +1231,7 @@ EOF
 		echo -e "\n\n=============📌CONFIG PSAM [DKI] NOW📌=============="
 		ssh -t $SSH_READER "cat $PATH_FILE_PSAM_config"
 		echo -e "=====================================================\n\n"
-
+		
 		echo -e "\n===============🔄INIT PSAM PROCESS🔄================\n"
 		if ssh "$SSH_READER" 'ls /media/mmc/reader-log-*.log 1>/dev/null 2>&1'; then
 		ssh -t $SSH_READER "grep -A 2 'SAM Select' \$(ls -t /media/mmc/reader-log-*.log | head -n 1)"
@@ -1222,12 +1241,12 @@ EOF
 		echo -e "=====================================================\n"
 		fi
 	}
-
+	
 	reboot_reader_dki(){
 		clear
 		echo -e "====================================================="
 		echo "==============🔄REBOOT PARKEE READER🔄=============="
-		if ! ssh "$SSH_READER" "reboot now" ; then
+		if ! ssh "$SSH_READER" "reboot now" ; then 
 			echo "==========❌FAILED REBOOT PARKEE READER❌==========="
 			echo -e "=====================================================\n"
 			return 1
@@ -1247,7 +1266,7 @@ EOF
 			echo -e "======✅RESTARTING PARKEE AGENT SERVICE DONE✅======"
 			echo -e "=====================================================\n"
 		fi
-
+		
 		echo -e "====================================================="
 		echo -e "===============🔄INIT PSAM PROCESS🔄================"
 	if ! ssh "$SSH_READER" 'ls /media/mmc/reader-log-*.log 1>/dev/null 2>&1'; then
@@ -1264,8 +1283,8 @@ EOF
 		fi
 
 	}
-
-
+	
+		
 	# Menu pilihan
 	while true; do
 echo -e "Gate : $(whoami)\n"
@@ -1311,12 +1330,231 @@ fi
 
 }
 
+ubah_psam() {
+	local PSAM_FILE="/apps/parque/data/config.ini"
+
+	# Helper: tampilkan config saat ini
+	show_config(){
+		echo -e "====================================================="
+		echo -e "===========📋CONFIG READER SAAT INI📋==============="
+		echo -e "====================================================="
+		ssh "$SSH_READER" "cat $PSAM_FILE"
+		echo -e "=====================================================\n"
+	}
+
+	# Helper: apply sed untuk 1 field di dalam section tertentu
+	# Usage: apply_field SECTION KEY VALUE
+	apply_field(){
+		local section="$1"
+		local key="$2"
+		local value="$3"
+		ssh "$SSH_READER" "sed -i '/^\[$section\]/,/^\[/{s|^${key}=.*|${key}=${value}|}' $PSAM_FILE"
+	}
+
+	# -------------------------------------------------------
+	# Submenu tiap bank — field disesuaikan masing-masing
+	# -------------------------------------------------------
+
+	ubah_reader(){
+		clear
+		echo -e "====================================================="
+		echo -e "=============🏦UBAH CONFIG [READER]🏦================"
+		echo -e "====================================================="
+		ssh "$SSH_READER" "cat $PSAM_FILE | grep 'READER' -A 3"
+		echo -e "====================================================="
+		read -p "MID baru (kosongkan = skip): " v_mid
+		read -p "TID baru (kosongkan = skip): " v_tid
+		read -p "Mode baru (kosongkan = skip): " v_mode
+		echo -e "\n⚠️  KONFIRMASI PERUBAHAN [READER]:"
+		[[ -n "$v_mid"  ]] && echo -e "  MID  : $v_mid"
+		[[ -n "$v_tid"  ]] && echo -e "  TID  : $v_tid"
+		[[ -n "$v_mode" ]] && echo -e "  Mode : $v_mode"
+		read -p "Lanjutkan? (y/n): " konfirm
+		[[ "$konfirm" != "y" ]] && echo -e "❌ Dibatalkan." && return
+		[[ -n "$v_mid"  ]] && apply_field "READER" "MID" "$v_mid"
+		[[ -n "$v_tid"  ]] && apply_field "READER" "TID" "$v_tid"
+		[[ -n "$v_mode" ]] && apply_field "READER" "Mode" "$v_mode"
+		echo -e "✅ [READER] UPDATED\n"
+		show_config
+	}
+
+	ubah_mandiri(){
+		clear
+		echo -e "====================================================="
+		echo -e "=============🏦UBAH CONFIG [MANDIRI]🏦==============="
+		echo -e "====================================================="
+		ssh "$SSH_READER" "cat $PSAM_FILE | grep 'MANDIRI' -A 5"
+		echo -e "====================================================="
+		read -p "INSID baru (kosongkan = skip): " v_insid
+		read -p "PIN baru   (kosongkan = skip): " v_pin
+		read -p "MID baru   (kosongkan = skip): " v_mid
+		read -p "TID baru   (kosongkan = skip): " v_tid
+		read -p "slot baru  (kosongkan = skip): " v_slot
+		echo -e "\n⚠️  KONFIRMASI PERUBAHAN [MANDIRI]:"
+		[[ -n "$v_insid" ]] && echo -e "  INSID : $v_insid"
+		[[ -n "$v_pin"   ]] && echo -e "  PIN   : $v_pin"
+		[[ -n "$v_mid"   ]] && echo -e "  MID   : $v_mid"
+		[[ -n "$v_tid"   ]] && echo -e "  TID   : $v_tid"
+		[[ -n "$v_slot"  ]] && echo -e "  slot  : $v_slot"
+		read -p "Lanjutkan? (y/n): " konfirm
+		[[ "$konfirm" != "y" ]] && echo -e "❌ Dibatalkan." && return
+		[[ -n "$v_insid" ]] && apply_field "MANDIRI" "INSID" "$v_insid"
+		[[ -n "$v_pin"   ]] && apply_field "MANDIRI" "PIN"   "$v_pin"
+		[[ -n "$v_mid"   ]] && apply_field "MANDIRI" "MID"   "$v_mid"
+		[[ -n "$v_tid"   ]] && apply_field "MANDIRI" "TID"   "$v_tid"
+		[[ -n "$v_slot"  ]] && apply_field "MANDIRI" "slot"  "$v_slot"
+		echo -e "✅ [MANDIRI] UPDATED\n"
+		show_config
+	}
+
+	ubah_bca(){
+		clear
+		echo -e "====================================================="
+		echo -e "=============🏦UBAH CONFIG [BCA]🏦=================="
+		echo -e "====================================================="
+		ssh "$SSH_READER" "cat $PSAM_FILE | grep 'BCA' -A 5"
+		echo -e "====================================================="
+		read -p "PREFIXTID baru (kosongkan = skip): " v_prefixtid
+		read -p "MINBAL baru    (kosongkan = skip): " v_minbal
+		read -p "MID baru       (kosongkan = skip): " v_mid
+		read -p "TID baru       (kosongkan = skip): " v_tid
+		read -p "slot baru      (kosongkan = skip): " v_slot
+		echo -e "\n⚠️  KONFIRMASI PERUBAHAN [BCA]:"
+		[[ -n "$v_prefixtid" ]] && echo -e "  PREFIXTID : $v_prefixtid"
+		[[ -n "$v_minbal"    ]] && echo -e "  MINBAL    : $v_minbal"
+		[[ -n "$v_mid"       ]] && echo -e "  MID       : $v_mid"
+		[[ -n "$v_tid"       ]] && echo -e "  TID       : $v_tid"
+		[[ -n "$v_slot"      ]] && echo -e "  slot      : $v_slot"
+		read -p "Lanjutkan? (y/n): " konfirm
+		[[ "$konfirm" != "y" ]] && echo -e "❌ Dibatalkan." && return
+		[[ -n "$v_prefixtid" ]] && apply_field "BCA" "PREFIXTID" "$v_prefixtid"
+		[[ -n "$v_minbal"    ]] && apply_field "BCA" "MINBAL"    "$v_minbal"
+		[[ -n "$v_mid"       ]] && apply_field "BCA" "MID"       "$v_mid"
+		[[ -n "$v_tid"       ]] && apply_field "BCA" "TID"       "$v_tid"
+		[[ -n "$v_slot"      ]] && apply_field "BCA" "slot"      "$v_slot"
+		echo -e "✅ [BCA] UPDATED\n"
+		show_config
+	}
+
+	ubah_bri(){
+		clear
+		echo -e "====================================================="
+		echo -e "=============🏦UBAH CONFIG [BRI]🏦=================="
+		echo -e "====================================================="
+		ssh "$SSH_READER" "cat $PSAM_FILE | grep 'BRI' -A 5"
+		echo -e "====================================================="
+		read -p "BATCH baru   (kosongkan = skip): " v_batch
+		read -p "MID baru     (kosongkan = skip): " v_mid
+		read -p "TID baru     (kosongkan = skip): " v_tid
+		read -p "PROCODE baru (kosongkan = skip): " v_procode
+		read -p "slot baru    (kosongkan = skip): " v_slot
+		echo -e "\n⚠️  KONFIRMASI PERUBAHAN [BRI]:"
+		[[ -n "$v_batch"   ]] && echo -e "  BATCH   : $v_batch"
+		[[ -n "$v_mid"     ]] && echo -e "  MID     : $v_mid"
+		[[ -n "$v_tid"     ]] && echo -e "  TID     : $v_tid"
+		[[ -n "$v_procode" ]] && echo -e "  PROCODE : $v_procode"
+		[[ -n "$v_slot"    ]] && echo -e "  slot    : $v_slot"
+		read -p "Lanjutkan? (y/n): " konfirm
+		[[ "$konfirm" != "y" ]] && echo -e "❌ Dibatalkan." && return
+		[[ -n "$v_batch"   ]] && apply_field "BRI" "BATCH"   "$v_batch"
+		[[ -n "$v_mid"     ]] && apply_field "BRI" "MID"     "$v_mid"
+		[[ -n "$v_tid"     ]] && apply_field "BRI" "TID"     "$v_tid"
+		[[ -n "$v_procode" ]] && apply_field "BRI" "PROCODE" "$v_procode"
+		[[ -n "$v_slot"    ]] && apply_field "BRI" "slot"    "$v_slot"
+		echo -e "✅ [BRI] UPDATED\n"
+		show_config
+	}
+
+	ubah_bni(){
+		clear
+		echo -e "====================================================="
+		echo -e "=============🏦UBAH CONFIG [BNI]🏦=================="
+		echo -e "====================================================="
+		ssh "$SSH_READER" "cat $PSAM_FILE | grep 'BNI' -A 5"
+		echo -e "====================================================="
+		read -p "MRG baru  (kosongkan = skip): " v_mrg
+		read -p "MID baru  (kosongkan = skip): " v_mid
+		read -p "TID baru  (kosongkan = skip): " v_tid
+		read -p "slot baru (kosongkan = skip): " v_slot
+		echo -e "\n⚠️  KONFIRMASI PERUBAHAN [BNI]:"
+		[[ -n "$v_mrg"  ]] && echo -e "  MRG  : $v_mrg"
+		[[ -n "$v_mid"  ]] && echo -e "  MID  : $v_mid"
+		[[ -n "$v_tid"  ]] && echo -e "  TID  : $v_tid"
+		[[ -n "$v_slot" ]] && echo -e "  slot : $v_slot"
+		read -p "Lanjutkan? (y/n): " konfirm
+		[[ "$konfirm" != "y" ]] && echo -e "❌ Dibatalkan." && return
+		[[ -n "$v_mrg"  ]] && apply_field "BNI" "MRG"  "$v_mrg"
+		[[ -n "$v_mid"  ]] && apply_field "BNI" "MID"  "$v_mid"
+		[[ -n "$v_tid"  ]] && apply_field "BNI" "TID"  "$v_tid"
+		[[ -n "$v_slot" ]] && apply_field "BNI" "slot" "$v_slot"
+		echo -e "✅ [BNI] UPDATED\n"
+		show_config
+	}
+
+	ubah_dki(){
+		clear
+		echo -e "====================================================="
+		echo -e "=============🏦UBAH CONFIG [DKI]🏦=================="
+		echo -e "====================================================="
+		ssh "$SSH_READER" "cat $PSAM_FILE | grep 'DKI' -A 5"
+		echo -e "====================================================="
+		read -p "MID baru   (kosongkan = skip): " v_mid
+		read -p "TID baru   (kosongkan = skip): " v_tid
+		read -p "BATCH baru (kosongkan = skip): " v_batch
+		read -p "slot baru  (kosongkan = skip): " v_slot
+		echo -e "\n⚠️  KONFIRMASI PERUBAHAN [DKI]:"
+		[[ -n "$v_mid"   ]] && echo -e "  MID   : $v_mid"
+		[[ -n "$v_tid"   ]] && echo -e "  TID   : $v_tid"
+		[[ -n "$v_batch" ]] && echo -e "  BATCH : $v_batch"
+		[[ -n "$v_slot"  ]] && echo -e "  slot  : $v_slot"
+		read -p "Lanjutkan? (y/n): " konfirm
+		[[ "$konfirm" != "y" ]] && echo -e "❌ Dibatalkan." && return
+		[[ -n "$v_mid"   ]] && apply_field "DKI" "MID"   "$v_mid"
+		[[ -n "$v_tid"   ]] && apply_field "DKI" "TID"   "$v_tid"
+		[[ -n "$v_batch" ]] && apply_field "DKI" "BATCH" "$v_batch"
+		[[ -n "$v_slot"  ]] && apply_field "DKI" "slot"  "$v_slot"
+		echo -e "✅ [DKI] UPDATED\n"
+		show_config
+	}
+
+	# -------------------------------------------------------
+	# Submenu ubah_psam
+	# -------------------------------------------------------
+	while true; do
+		clear
+		show_config
+		echo -e "====================================================="
+		echo -e "===========🔧UBAH CONFIG PSAM READER🔧=============="
+		echo -e "====================================================="
+		echo -e "1. READER"
+		echo -e "2. MANDIRI"
+		echo -e "3. BCA"
+		echo -e "4. BRI"
+		echo -e "5. BNI"
+		echo -e "6. DKI"
+		echo -e "7. Kembali ke menu utama"
+		echo -e "====================================================="
+		read -p "INPUT pilihan (1-7): " pilihan_psam
+
+		case $pilihan_psam in
+		1) ubah_reader ;;
+		2) ubah_mandiri ;;
+		3) ubah_bca ;;
+		4) ubah_bri ;;
+		5) ubah_bni ;;
+		6) ubah_dki ;;
+		7) clear && return ;;
+		*) echo -e "❌ Pilihan tidak valid." ;;
+		esac
+	done
+}
+
 reboot_reader() {
 	clear
 	echo -e "====================================================="
 	echo -e "==============🔄REBOOT PARKEE READER🔄==============="
 	echo -e "=====================================================\n"
-	if ! ssh "$SSH_READER" "reboot now" ; then
+	if ! ssh "$SSH_READER" "reboot now" ; then 
 		echo -e "====================================================="
 		echo "==========❌FAILED REBOOT PARKEE READER❌============"
 		echo -e "=====================================================\n"
@@ -1331,7 +1569,7 @@ reboot_reader() {
 		echo -e "=========✅PARKEE READER HAS BEEN RUNNING✅=========="
 		echo -e "=====================================================\n"
 	fi
-
+	
 	echo -e "====================================================="
 	echo -e "===============🔄INIT PSAM PROCESS🔄================="
 	echo -e "=====================================================\n"
@@ -1383,11 +1621,12 @@ fi
 	echo -e "4. Restart NIC/Port LAN"
 	echo -e "5. Update Versi Reader"
 	echo -e "6. Cek Versi Agent & Reader"
-	echo -e "7. PSAM DKI"
-	echo -e "8. Reboot Reader"
-	echo -e "9. Keluar"
+	echo -e "7. Ubah Config PSAM"
+	echo -e "8. PSAM DKI"
+	echo -e "9. Reboot Reader"
+	echo -e "10. Keluar"
 	echo -e "====================================================="
-	read -p "INPUT pilihan (0-9): " pilihan
+	read -p "INPUT pilihan (0-10): " pilihan
 
 	case $pilihan in
 	0) cek_ip ;;
@@ -1397,9 +1636,11 @@ fi
 	4) restart_nic ;;
 	5) update_reader ;;
 	6) cek_version ;;
-	7) psam_dki ;;
-	8) reboot_reader ;;
-	9) echo -e "👋 Keluar..."; sleep 1; clear; exit ;;
+	7) ubah_psam ;;
+	8) psam_dki ;;
+	9) reboot_reader ;;
+	10) echo -e "👋 Keluar..."; sleep 1; clear; exit ;;
 	*) echo -e "❌ Pilihan tidak valid!";;
 	esac
 done
+
