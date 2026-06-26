@@ -187,7 +187,7 @@ class GasakDistHandler(http.server.SimpleHTTPRequestHandler):
         'settlement_rfs.py', 'version.txt', 'server.properties',
         'reinstall-vault.sh', 'reader_script.sh', 'update_reader.sh',
         'jellies_scripts.zip', 'parque-fw-14.zip', 'parque-fw-17.zip', 'parque-fw-19.zip',
-        'parque-v1.00.17-905e5f60e.zip', 'parque-v1.00.19-625929d22.zip', 'v1.00.14-f577de6e5.zip'
+        'parque-v1.00.17-905e5f60e.zip', 'parque-v1.00.19-625929d22.zip', 'v1.00.14-f577de6e5.zip', 'parque-*.zip'
     ]
 
     def do_GET(self):
