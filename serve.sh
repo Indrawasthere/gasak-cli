@@ -16,6 +16,7 @@ chmod 755 install.sh     2>/dev/null || true
 chmod 755 serve.sh       2>/dev/null || true
 chmod 755 gasak.exe      2>/dev/null || true
 chmod 644 ./*.py         2>/dev/null || true
+chmod 644 .
 chmod 644 version.txt    2>/dev/null || true
 chmod 644 server.properties 2>/dev/null || true
 chmod 755 reinstall-vault.sh 2>/dev/null || true
