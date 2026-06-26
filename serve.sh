@@ -14,6 +14,7 @@ cd "$DIST_DIR" || exit 1
 chmod 755 gasak          2>/dev/null || true
 chmod 755 install.sh     2>/dev/null || true
 chmod 755 serve.sh       2>/dev/null || true
+chmod 755 gasak.exe      2>/dev/null || true
 chmod 644 ./*.py         2>/dev/null || true
 chmod 644 version.txt    2>/dev/null || true
 chmod 644 server.properties 2>/dev/null || true
@@ -34,9 +35,12 @@ echo ""
 
 ALL_FILES=(
     "gasak"
+    "gasak.exe"
     "install.sh"
+    "install.ps1"
     "decode_and_merge.py"
     "deploy_parkee.py"
+    "deploy_parkee_win.py"
     "log_cleaner.py"
     "settlement_rfs.py"
     "version.txt"
@@ -164,7 +168,7 @@ def get_latest_version():
 def generate_checksums():
     checksums = {}
     files = [
-        "gasak", "install.sh", "decode_and_merge.py", "deploy_parkee.py",
+        "gasak", "gasak.exe", "install.sh", "install.ps1","decode_and_merge.py", "deploy_parkee.py", "deploy_parkee_win.py"
         "log_cleaner.py", "settlement_rfs.py", "server.properties", "reader_script.sh"
     ]
     for f in files:
@@ -175,9 +179,7 @@ def generate_checksums():
 
 class GasakDistHandler(http.server.SimpleHTTPRequestHandler):
     WHITELIST = [
-        'gasak', 'install.sh', 'serve.sh', 'decode_and_merge.py',
-        'deploy_parkee.py', 'log_cleaner.py', 'settlement_rfs.py',
-        'version.txt', 'server.properties', 'reinstall-vault.sh', 'reader_script.sh', 'update_reader.sh', 'jellies_scripts.zip', 'parque-fw-14.zip', 'parque-fw-17.zip', 'parque-fw-19.zip'
+        'gasak', 'gasak.exe' 'install.sh', 'install.ps1', 'serve.sh', 'decode_and_merge.py', 'deploy_parkee.py', 'deploy_parkee_win.py', 'log_cleaner.py', 'settlement_rfs.py', 'version.txt', 'server.properties', 'reinstall-vault.sh', 'reader_script.sh', 'update_reader.sh', 'jellies_scripts.zip', 'parque-fw-14.zip', 'parque-fw-17.zip', 'parque-fw-19.zip'
     ]
 
     def do_GET(self):
@@ -381,7 +383,7 @@ class GasakDistHandler(http.server.SimpleHTTPRequestHandler):
     def detect_content_type(self, filename):
         if filename == 'gasak':
             return 'application/octet-stream'
-        if filename.endswith('.sh'):
+        if filename.endswith(('.sh', '.ps1')):
             return 'text/plain; charset=utf-8'
         if filename.endswith('.py'):
             return 'text/plain; charset=utf-8'

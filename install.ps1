@@ -34,22 +34,22 @@ function warn($msg) { Write-Host "   [!] $msg" -ForegroundColor Yellow }
 function info($msg) { Write-Host "   --> $msg" -ForegroundColor Cyan }
 function step($msg) { Write-Host "`n$msg" -ForegroundColor Cyan }
 
-# ─── HEADER ──────────────────────────────────────────────────
-Clear-Host
-Write-Host ""
-Write-Host "  ██████╗  █████╗ ███████╗ █████╗ ██╗  ██╗" -ForegroundColor Magenta
-Write-Host "  ██╔════╝ ██╔══██╗██╔════╝██╔══██╗██║ ██╔╝" -ForegroundColor Magenta
-Write-Host "  ██║   ███╗███████║███████╗███████║█████╔╝ " -ForegroundColor Magenta
-Write-Host "  ██║   ██║██╔══██║╚════██║██╔══██║██╔═██╗ " -ForegroundColor Magenta
-Write-Host "  ╚██████╔╝██║  ██║███████║██║  ██║██║  ██╗" -ForegroundColor Magenta
-Write-Host "   ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝" -ForegroundColor Magenta
-Write-Host ""
-Write-Host "  ╔═══════════════════════════════════════════════════════════╗" -ForegroundColor White
-Write-Host "  ║  GASAK SYSTEM TOOLCHAIN INSTALLER  v1.0 (Windows)        ║" -ForegroundColor White
-Write-Host "  ╚═══════════════════════════════════════════════════════════╝" -ForegroundColor White
-Write-Host ""
-
-# ─── STEP 1: PREFLIGHT ───────────────────────────────────────
+## ─── HEADER ──────────────────────────────────────────────────
+#Clear-Host
+#Write-Host ""
+#Write-Host "  ██████╗  █████╗ ███████╗ █████╗ ██╗  ██╗" -ForegroundColor Magenta
+#Write-Host "  ██╔════╝ ██╔══██╗██╔════╝██╔══██╗██║ ██╔╝" -ForegroundColor Magenta
+#Write-Host "  ██║   ███╗███████║███████╗███████║█████╔╝ " -ForegroundColor Magenta
+#Write-Host "  ██║   ██║██╔══██║╚════██║██╔══██║██╔═██╗ " -ForegroundColor Magenta
+#Write-Host "  ╚██████╔╝██║  ██║███████║██║  ██║██║  ██╗" -ForegroundColor Magenta
+#Write-Host "   ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝" -ForegroundColor Magenta
+#Write-Host ""
+#Write-Host "  ╔═══════════════════════════════════════════════════════════╗" -ForegroundColor White
+#Write-Host "  ║  GASAK SYSTEM TOOLCHAIN INSTALLER  v1.0 (Windows)        ║" -ForegroundColor White
+#Write-Host "  ╚═══════════════════════════════════════════════════════════╝" -ForegroundColor White
+#Write-Host ""
+#
+## ─── STEP 1: PREFLIGHT ───────────────────────────────────────
 step "  ┌─ STEP 1/5: System Compatibility Check"
 
 # PowerShell version check
