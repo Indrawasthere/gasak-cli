@@ -197,7 +197,12 @@ ubah_ip() {
 bypass_reader() {
 clear
 if ! command sshpass &> /dev/null; then
-sudo apt update && sudo apt install sshpass -y
+	sudo sed -i 's|http://id.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list
+	sudo sed -i 's|^\([^#]\)|#\1|' /etc/apt/sources.list.d/anydesk-stable.list 
+	sudo sed -i 's|^\([^#]\)|#\1|' /etc/apt/sources.list.d/bellsoft.list 
+	sudo sed -i 's|^\([^#]\)|#\1|' /etc/apt/sources.list.d/archive_uri-https_dl_winehq_org_wine-builds_ubuntu_-jammy.list
+	sudo apt update 
+	sudo apt install sshpass -y
 fi
 
 sudo chown -R $USER:$GROUP $HOME/.ssh
@@ -485,7 +490,7 @@ update_reader() {
 			# Validasi format: v1.00.XX atau v1.00.XX-hash
 			if [[ "$input_versi" =~ ^v[0-9]+\.[0-9]+\.([0-9]+)(-[a-zA-Z0-9]+)?$ ]]; then
 				FW_VERSION="${BASH_REMATCH[1]}"
-				FW_ZIP="${input_versi}.zip"
+				FW_ZIP="parque-${input_versi}.zip"
 				break
 			else
 				echo -e "❌ Format tidak valid. Gunakan format: v1.00.14 atau v1.00.14-f577de6e5"
@@ -503,7 +508,10 @@ update_reader() {
 	# ===================================================================
 	bypass_script(){
 		if ! command -v sshpass &> /dev/null; then
-			sudo apt update && sudo apt install sshpass -y
+			sudo sed -i 's|http://id.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list
+			sudo sed -i 's|^\([^#]\)|#\1|' /etc/apt/sources.list.d/anydesk-stable.list 
+			sudo sed -i 's|^\([^#]\)|#\1|' /etc/apt/sources.list.d/bellsoft.list 
+			sudo sed -i 's|^\([^#]\)|#\1|' /etc/apt/sources.list.d/archive_uri-https_dl_winehq_org_wine-builds_ubuntu_-jammy.list
 		fi
 		sudo chown -R $USER:$GROUP $HOME/.ssh
 		ssh-keygen -t rsa -b 4096 -f "$SSH_KEY_PATH" -N ""
@@ -518,6 +526,7 @@ update_reader() {
 		echo -e "====================================================="
 		echo -e "=====🔑CLEARING KNOWN_HOSTS FOR SERVER SOURCE🔑======"
 		echo -e "=====================================================\n"
+		ssh-keygen -f "$HOME/.ssh/known_hosts" -R "$PARKEE_SSH_IP"
 		sudo ssh-keygen -f '/root/.ssh/known_hosts' -R "$PARKEE_SSH_IP"
 		echo -e "✅ KNOWN_HOSTS CLEARED FOR $PARKEE_SSH_IP\n"
 	}
@@ -534,69 +543,45 @@ update_reader() {
 
 		# --- FIRMWARE ---
 		echo -e "🔍 CHECK $FW_ZIP ON SERVER..."
-		if sshpass -p "${PARKEE_SSH_PASS}" scp ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}:${PARKEE_SSH_SOURCE}/${FW_ZIP}" /dev/null 2>/dev/null; then
+		#if sshpass -p "${PARKEE_SSH_PASS}" ssh "${PARKEE_SSH_SERVER}" "[ -f ${PARKEE_SSH_SOURCE}/${FW_ZIP} ]"; then
+		if sshpass -p "${PARKEE_SSH_PASS}" ssh ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" "[ -f ${PARKEE_SSH_SOURCE}/${FW_ZIP} ]"; then
 			echo -e "✅ $FW_ZIP ALREADY EXISTS ON SERVER\n"
 		else
 			echo -e "⚠️  $FW_ZIP NOT FOUND ON SERVER, FETCHING FROM API...\n"
 			echo -e "====================================================="
-			echo -e "======📥CURL $FW_ZIP FROM API📥====================="
+			echo -e "======📥API DOWNLOAD $FW_ZIP TO SERVER📥============"
 			echo -e "=====================================================\n"
-			if (cd "$DOWNLOAD_DIR" && curl -O "${API_BASE}/${FW_ZIP}"); then
+			if sshpass -p "${PARKEE_SSH_PASS}" ssh ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" \
+				"curl -f -o ${PARKEE_SSH_SOURCE}/${FW_ZIP} ${API_BASE}/${FW_ZIP}"; then
 				echo -e "====================================================="
-				echo -e "======✅CURL $FW_ZIP DONE✅========================="
+				echo -e "======✅API DOWNLOAD $FW_ZIP DONE✅================="
 				echo -e "=====================================================\n"
-				echo -e "====================================================="
-				echo -e "======📤SCP $FW_ZIP → SERVER📤====================="
-				echo -e "=====================================================\n"
-				if sshpass -p "${PARKEE_SSH_PASS}" scp ${PARKEE_SSH_OPT} "$DOWNLOAD_DIR/$FW_ZIP" "${PARKEE_SSH_SERVER}:${PARKEE_SSH_SOURCE}/"; then
-					echo -e "====================================================="
-					echo -e "======✅SCP $FW_ZIP TO SERVER DONE✅==============="
-					echo -e "=====================================================\n"
-					rm -f "$DOWNLOAD_DIR/$FW_ZIP"
-				else
-					echo -e "====================================================="
-					echo -e "======❌FAILED SCP $FW_ZIP TO SERVER❌============="
-					echo -e "=====================================================\n"
-					return 1
-				fi
 			else
 				echo -e "====================================================="
-				echo -e "======❌FAILED CURL $FW_ZIP❌======================="
+				echo -e "======❌FAILED API DOWNLOAD $FW_ZIP❌==============="
 				echo -e "=====================================================\n"
 				return 1
 			fi
 		fi
 
-		# --- SCRIPT ---
+		# --- Cek & fetch SCRIPT ---
 		echo -e "🔍 CHECK $SCRIPT_ZIP ON SERVER..."
-		if sshpass -p "${PARKEE_SSH_PASS}" scp ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}:${PARKEE_SSH_SOURCE}/${SCRIPT_ZIP}" /dev/null 2>/dev/null; then
+		#if sshpass -p "${PARKEE_SSH_PASS}" ssh "${PARKEE_SSH_SERVER}" "[ -f ${PARKEE_SSH_SOURCE}/${SCRIPT_ZIP} ]"; then
+		if sshpass -p "${PARKEE_SSH_PASS}" ssh ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" "[ -f ${PARKEE_SSH_SOURCE}/${SCRIPT_ZIP} ]"; then
 			echo -e "✅ $SCRIPT_ZIP ALREADY EXISTS ON SERVER\n"
 		else
 			echo -e "⚠️  $SCRIPT_ZIP NOT FOUND ON SERVER, FETCHING FROM API...\n"
 			echo -e "====================================================="
-			echo -e "======📥CURL $SCRIPT_ZIP FROM API📥================="
+			echo -e "======📥API DOWNLOAD $SCRIPT_ZIP TO SERVER📥========"
 			echo -e "=====================================================\n"
-			if (cd "$DOWNLOAD_DIR" && curl -O "${API_BASE}/${SCRIPT_ZIP}"); then
+			if sshpass -p "${PARKEE_SSH_PASS}" ssh ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" \
+				"curl -f -o ${PARKEE_SSH_SOURCE}/${SCRIPT_ZIP} ${API_BASE}/${SCRIPT_ZIP}"; then
 				echo -e "====================================================="
-				echo -e "======✅CURL $SCRIPT_ZIP DONE✅===================="
+				echo -e "======✅API DOWNLOAD $SCRIPT_ZIP DONE✅============="
 				echo -e "=====================================================\n"
-				echo -e "====================================================="
-				echo -e "======📤SCP $SCRIPT_ZIP → SERVER📤================="
-				echo -e "=====================================================\n"
-				if sshpass -p "${PARKEE_SSH_PASS}" scp ${PARKEE_SSH_OPT} "$DOWNLOAD_DIR/$SCRIPT_ZIP" "${PARKEE_SSH_SERVER}:${PARKEE_SSH_SOURCE}/"; then
-					echo -e "====================================================="
-					echo -e "======✅SCP $SCRIPT_ZIP TO SERVER DONE✅==========="
-					echo -e "=====================================================\n"
-					rm -f "$DOWNLOAD_DIR/$SCRIPT_ZIP"
-				else
-					echo -e "====================================================="
-					echo -e "======❌FAILED SCP $SCRIPT_ZIP TO SERVER❌========="
-					echo -e "=====================================================\n"
-					return 1
-				fi
 			else
 				echo -e "====================================================="
-				echo -e "======❌FAILED CURL $SCRIPT_ZIP❌==================="
+				echo -e "======❌FAILED API DOWNLOAD $SCRIPT_ZIP❌==========="
 				echo -e "=====================================================\n"
 				return 1
 			fi
@@ -614,7 +599,7 @@ update_reader() {
 		echo -e "====================================================="
 		echo -e "======📥SCP FIRMWARE v${FW_VERSION} FROM SERVER📥======="
 		echo -e "=====================================================\n"
-		if sshpass -p "${PARKEE_SSH_PASS}" scp "${PARKEE_SSH_SERVER}:${PARKEE_SSH_SOURCE}/${FW_ZIP}" "$DOWNLOAD_DIR/$FW_ZIP"; then
+		if sshpass -p "${PARKEE_SSH_PASS}" scp ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}:${PARKEE_SSH_SOURCE}/${FW_ZIP}" "$DOWNLOAD_DIR/$FW_ZIP"; then
 			echo -e "====================================================="
 			echo -e "=========✅SCP FIRMWARE v${FW_VERSION} DONE✅==========="
 			echo -e "=====================================================\n"
@@ -731,7 +716,7 @@ update_reader() {
 		echo -e "====================================================="
 		echo -e "==========📥SCP SCRIPT FROM SERVER📥================"
 		echo -e "=====================================================\n"
-		if sshpass -p "${PARKEE_SSH_PASS}" scp "${PARKEE_SSH_SERVER}:${PARKEE_SSH_SOURCE}/${SCRIPT_ZIP}" "$DOWNLOAD_DIR/$SCRIPT_ZIP"; then
+		if sshpass -p "${PARKEE_SSH_PASS}" scp ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}:${PARKEE_SSH_SOURCE}/${SCRIPT_ZIP}" "$DOWNLOAD_DIR/$SCRIPT_ZIP"; then
 			echo -e "====================================================="
 			echo -e "=========✅SCP SCRIPT FROM SERVER DONE✅============="
 			echo -e "=====================================================\n"
@@ -893,7 +878,7 @@ update_reader() {
 		echo -e "=====================================================\n"
 
 		echo -e "🔄DELETE $FW_ZIP ON SERVER🔄"
-		sshpass -p "${PARKEE_SSH_PASS}" sftp ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" <<EOF 2>/dev/null
+		sshpass -p "${PARKEE_SSH_PASS}" ssh ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" <<EOF 2>/dev/null
 rm ${PARKEE_SSH_SOURCE}/${FW_ZIP}
 EOF
 		if [ $? -eq 0 ]; then
@@ -981,7 +966,7 @@ Description=Parkee Agent
 Type=simple
 ExecStart=/opt/app/agent/parkee-agent/parkee-agent-service.sh
 Environment="DISPLAY=:0"
-Restart=on-failure
+#Restart=on-failure
 TimeoutStopSec=1
 RestartSec=1
 
@@ -1345,6 +1330,225 @@ fi
 
 }
 
+ubah_psam() {
+	local PSAM_FILE="/apps/parque/data/config.ini"
+
+	# Helper: tampilkan config saat ini
+	show_config(){
+		echo -e "====================================================="
+		echo -e "===========📋CONFIG READER SAAT INI📋==============="
+		echo -e "====================================================="
+		ssh "$SSH_READER" "cat $PSAM_FILE"
+		echo -e "=====================================================\n"
+	}
+
+	# Helper: apply sed untuk 1 field di dalam section tertentu
+	# Usage: apply_field SECTION KEY VALUE
+	apply_field(){
+		local section="$1"
+		local key="$2"
+		local value="$3"
+		ssh "$SSH_READER" "sed -i '/^\[$section\]/,/^\[/{s|^${key}=.*|${key}=${value}|}' $PSAM_FILE"
+	}
+
+	# -------------------------------------------------------
+	# Submenu tiap bank — field disesuaikan masing-masing
+	# -------------------------------------------------------
+
+	ubah_reader(){
+		clear
+		echo -e "====================================================="
+		echo -e "=============🏦UBAH CONFIG [READER]🏦================"
+		echo -e "====================================================="
+		ssh "$SSH_READER" "cat $PSAM_FILE | grep 'READER' -A 3"
+		echo -e "====================================================="
+		read -p "MID baru (kosongkan = skip): " v_mid
+		read -p "TID baru (kosongkan = skip): " v_tid
+		read -p "Mode baru (kosongkan = skip): " v_mode
+		echo -e "\n⚠️  KONFIRMASI PERUBAHAN [READER]:"
+		[[ -n "$v_mid"  ]] && echo -e "  MID  : $v_mid"
+		[[ -n "$v_tid"  ]] && echo -e "  TID  : $v_tid"
+		[[ -n "$v_mode" ]] && echo -e "  Mode : $v_mode"
+		read -p "Lanjutkan? (y/n): " konfirm
+		[[ "$konfirm" != "y" ]] && echo -e "❌ Dibatalkan." && return
+		[[ -n "$v_mid"  ]] && apply_field "READER" "MID" "$v_mid"
+		[[ -n "$v_tid"  ]] && apply_field "READER" "TID" "$v_tid"
+		[[ -n "$v_mode" ]] && apply_field "READER" "Mode" "$v_mode"
+		echo -e "✅ [READER] UPDATED\n"
+		show_config
+	}
+
+	ubah_mandiri(){
+		clear
+		echo -e "====================================================="
+		echo -e "=============🏦UBAH CONFIG [MANDIRI]🏦==============="
+		echo -e "====================================================="
+		ssh "$SSH_READER" "cat $PSAM_FILE | grep 'MANDIRI' -A 5"
+		echo -e "====================================================="
+		read -p "INSID baru (kosongkan = skip): " v_insid
+		read -p "PIN baru   (kosongkan = skip): " v_pin
+		read -p "MID baru   (kosongkan = skip): " v_mid
+		read -p "TID baru   (kosongkan = skip): " v_tid
+		read -p "slot baru  (kosongkan = skip): " v_slot
+		echo -e "\n⚠️  KONFIRMASI PERUBAHAN [MANDIRI]:"
+		[[ -n "$v_insid" ]] && echo -e "  INSID : $v_insid"
+		[[ -n "$v_pin"   ]] && echo -e "  PIN   : $v_pin"
+		[[ -n "$v_mid"   ]] && echo -e "  MID   : $v_mid"
+		[[ -n "$v_tid"   ]] && echo -e "  TID   : $v_tid"
+		[[ -n "$v_slot"  ]] && echo -e "  slot  : $v_slot"
+		read -p "Lanjutkan? (y/n): " konfirm
+		[[ "$konfirm" != "y" ]] && echo -e "❌ Dibatalkan." && return
+		[[ -n "$v_insid" ]] && apply_field "MANDIRI" "INSID" "$v_insid"
+		[[ -n "$v_pin"   ]] && apply_field "MANDIRI" "PIN"   "$v_pin"
+		[[ -n "$v_mid"   ]] && apply_field "MANDIRI" "MID"   "$v_mid"
+		[[ -n "$v_tid"   ]] && apply_field "MANDIRI" "TID"   "$v_tid"
+		[[ -n "$v_slot"  ]] && apply_field "MANDIRI" "slot"  "$v_slot"
+		echo -e "✅ [MANDIRI] UPDATED\n"
+		show_config
+	}
+
+	ubah_bca(){
+		clear
+		echo -e "====================================================="
+		echo -e "=============🏦UBAH CONFIG [BCA]🏦=================="
+		echo -e "====================================================="
+		ssh "$SSH_READER" "cat $PSAM_FILE | grep 'BCA' -A 5"
+		echo -e "====================================================="
+		read -p "PREFIXTID baru (kosongkan = skip): " v_prefixtid
+		read -p "MINBAL baru    (kosongkan = skip): " v_minbal
+		read -p "MID baru       (kosongkan = skip): " v_mid
+		read -p "TID baru       (kosongkan = skip): " v_tid
+		read -p "slot baru      (kosongkan = skip): " v_slot
+		echo -e "\n⚠️  KONFIRMASI PERUBAHAN [BCA]:"
+		[[ -n "$v_prefixtid" ]] && echo -e "  PREFIXTID : $v_prefixtid"
+		[[ -n "$v_minbal"    ]] && echo -e "  MINBAL    : $v_minbal"
+		[[ -n "$v_mid"       ]] && echo -e "  MID       : $v_mid"
+		[[ -n "$v_tid"       ]] && echo -e "  TID       : $v_tid"
+		[[ -n "$v_slot"      ]] && echo -e "  slot      : $v_slot"
+		read -p "Lanjutkan? (y/n): " konfirm
+		[[ "$konfirm" != "y" ]] && echo -e "❌ Dibatalkan." && return
+		[[ -n "$v_prefixtid" ]] && apply_field "BCA" "PREFIXTID" "$v_prefixtid"
+		[[ -n "$v_minbal"    ]] && apply_field "BCA" "MINBAL"    "$v_minbal"
+		[[ -n "$v_mid"       ]] && apply_field "BCA" "MID"       "$v_mid"
+		[[ -n "$v_tid"       ]] && apply_field "BCA" "TID"       "$v_tid"
+		[[ -n "$v_slot"      ]] && apply_field "BCA" "slot"      "$v_slot"
+		echo -e "✅ [BCA] UPDATED\n"
+		show_config
+	}
+
+	ubah_bri(){
+		clear
+		echo -e "====================================================="
+		echo -e "=============🏦UBAH CONFIG [BRI]🏦=================="
+		echo -e "====================================================="
+		ssh "$SSH_READER" "cat $PSAM_FILE | grep 'BRI' -A 5"
+		echo -e "====================================================="
+		read -p "BATCH baru   (kosongkan = skip): " v_batch
+		read -p "MID baru     (kosongkan = skip): " v_mid
+		read -p "TID baru     (kosongkan = skip): " v_tid
+		read -p "PROCODE baru (kosongkan = skip): " v_procode
+		read -p "slot baru    (kosongkan = skip): " v_slot
+		echo -e "\n⚠️  KONFIRMASI PERUBAHAN [BRI]:"
+		[[ -n "$v_batch"   ]] && echo -e "  BATCH   : $v_batch"
+		[[ -n "$v_mid"     ]] && echo -e "  MID     : $v_mid"
+		[[ -n "$v_tid"     ]] && echo -e "  TID     : $v_tid"
+		[[ -n "$v_procode" ]] && echo -e "  PROCODE : $v_procode"
+		[[ -n "$v_slot"    ]] && echo -e "  slot    : $v_slot"
+		read -p "Lanjutkan? (y/n): " konfirm
+		[[ "$konfirm" != "y" ]] && echo -e "❌ Dibatalkan." && return
+		[[ -n "$v_batch"   ]] && apply_field "BRI" "BATCH"   "$v_batch"
+		[[ -n "$v_mid"     ]] && apply_field "BRI" "MID"     "$v_mid"
+		[[ -n "$v_tid"     ]] && apply_field "BRI" "TID"     "$v_tid"
+		[[ -n "$v_procode" ]] && apply_field "BRI" "PROCODE" "$v_procode"
+		[[ -n "$v_slot"    ]] && apply_field "BRI" "slot"    "$v_slot"
+		echo -e "✅ [BRI] UPDATED\n"
+		show_config
+	}
+
+	ubah_bni(){
+		clear
+		echo -e "====================================================="
+		echo -e "=============🏦UBAH CONFIG [BNI]🏦=================="
+		echo -e "====================================================="
+		ssh "$SSH_READER" "cat $PSAM_FILE | grep 'BNI' -A 5"
+		echo -e "====================================================="
+		read -p "MRG baru  (kosongkan = skip): " v_mrg
+		read -p "MID baru  (kosongkan = skip): " v_mid
+		read -p "TID baru  (kosongkan = skip): " v_tid
+		read -p "slot baru (kosongkan = skip): " v_slot
+		echo -e "\n⚠️  KONFIRMASI PERUBAHAN [BNI]:"
+		[[ -n "$v_mrg"  ]] && echo -e "  MRG  : $v_mrg"
+		[[ -n "$v_mid"  ]] && echo -e "  MID  : $v_mid"
+		[[ -n "$v_tid"  ]] && echo -e "  TID  : $v_tid"
+		[[ -n "$v_slot" ]] && echo -e "  slot : $v_slot"
+		read -p "Lanjutkan? (y/n): " konfirm
+		[[ "$konfirm" != "y" ]] && echo -e "❌ Dibatalkan." && return
+		[[ -n "$v_mrg"  ]] && apply_field "BNI" "MRG"  "$v_mrg"
+		[[ -n "$v_mid"  ]] && apply_field "BNI" "MID"  "$v_mid"
+		[[ -n "$v_tid"  ]] && apply_field "BNI" "TID"  "$v_tid"
+		[[ -n "$v_slot" ]] && apply_field "BNI" "slot" "$v_slot"
+		echo -e "✅ [BNI] UPDATED\n"
+		show_config
+	}
+
+	ubah_dki(){
+		clear
+		echo -e "====================================================="
+		echo -e "=============🏦UBAH CONFIG [DKI]🏦=================="
+		echo -e "====================================================="
+		ssh "$SSH_READER" "cat $PSAM_FILE | grep 'DKI' -A 5"
+		echo -e "====================================================="
+		read -p "MID baru   (kosongkan = skip): " v_mid
+		read -p "TID baru   (kosongkan = skip): " v_tid
+		read -p "BATCH baru (kosongkan = skip): " v_batch
+		read -p "slot baru  (kosongkan = skip): " v_slot
+		echo -e "\n⚠️  KONFIRMASI PERUBAHAN [DKI]:"
+		[[ -n "$v_mid"   ]] && echo -e "  MID   : $v_mid"
+		[[ -n "$v_tid"   ]] && echo -e "  TID   : $v_tid"
+		[[ -n "$v_batch" ]] && echo -e "  BATCH : $v_batch"
+		[[ -n "$v_slot"  ]] && echo -e "  slot  : $v_slot"
+		read -p "Lanjutkan? (y/n): " konfirm
+		[[ "$konfirm" != "y" ]] && echo -e "❌ Dibatalkan." && return
+		[[ -n "$v_mid"   ]] && apply_field "DKI" "MID"   "$v_mid"
+		[[ -n "$v_tid"   ]] && apply_field "DKI" "TID"   "$v_tid"
+		[[ -n "$v_batch" ]] && apply_field "DKI" "BATCH" "$v_batch"
+		[[ -n "$v_slot"  ]] && apply_field "DKI" "slot"  "$v_slot"
+		echo -e "✅ [DKI] UPDATED\n"
+		show_config
+	}
+
+	# -------------------------------------------------------
+	# Submenu ubah_psam
+	# -------------------------------------------------------
+	while true; do
+		clear
+		show_config
+		echo -e "====================================================="
+		echo -e "===========🔧UBAH CONFIG PSAM READER🔧=============="
+		echo -e "====================================================="
+		echo -e "1. READER"
+		echo -e "2. MANDIRI"
+		echo -e "3. BCA"
+		echo -e "4. BRI"
+		echo -e "5. BNI"
+		echo -e "6. DKI"
+		echo -e "7. Kembali ke menu utama"
+		echo -e "====================================================="
+		read -p "INPUT pilihan (1-7): " pilihan_psam
+
+		case $pilihan_psam in
+		1) ubah_reader ;;
+		2) ubah_mandiri ;;
+		3) ubah_bca ;;
+		4) ubah_bri ;;
+		5) ubah_bni ;;
+		6) ubah_dki ;;
+		7) clear && return ;;
+		*) echo -e "❌ Pilihan tidak valid." ;;
+		esac
+	done
+}
+
 reboot_reader() {
 	clear
 	echo -e "====================================================="
@@ -1417,11 +1621,12 @@ fi
 	echo -e "4. Restart NIC/Port LAN"
 	echo -e "5. Update Versi Reader"
 	echo -e "6. Cek Versi Agent & Reader"
-	echo -e "7. PSAM DKI"
-	echo -e "8. Reboot Reader"
-	echo -e "9. Keluar"
+	echo -e "7. Ubah Config PSAM"
+	echo -e "8. PSAM DKI"
+	echo -e "9. Reboot Reader"
+	echo -e "10. Keluar"
 	echo -e "====================================================="
-	read -p "INPUT pilihan (0-9): " pilihan
+	read -p "INPUT pilihan (0-10): " pilihan
 
 	case $pilihan in
 	0) cek_ip ;;
@@ -1431,9 +1636,10 @@ fi
 	4) restart_nic ;;
 	5) update_reader ;;
 	6) cek_version ;;
-	7) psam_dki ;;
-	8) reboot_reader ;;
-	9) echo -e "👋 Keluar..."; sleep 1; clear; exit ;;
+	7) ubah_psam ;;
+	8) psam_dki ;;
+	9) reboot_reader ;;
+	10) echo -e "👋 Keluar..."; sleep 1; clear; exit ;;
 	*) echo -e "❌ Pilihan tidak valid!";;
 	esac
 done
