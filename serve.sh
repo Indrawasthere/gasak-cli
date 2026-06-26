@@ -16,7 +16,7 @@ chmod 755 install.sh     2>/dev/null || true
 chmod 755 serve.sh       2>/dev/null || true
 chmod 755 gasak.exe      2>/dev/null || true
 chmod 644 ./*.py         2>/dev/null || true
-chmod 644 .
+chmod 644 ./*.zip        2>/dev/null || true
 chmod 644 version.txt    2>/dev/null || true
 chmod 644 server.properties 2>/dev/null || true
 chmod 755 reinstall-vault.sh 2>/dev/null || true
@@ -188,7 +188,7 @@ class GasakDistHandler(http.server.SimpleHTTPRequestHandler):
         'settlement_rfs.py', 'version.txt', 'server.properties',
         'reinstall-vault.sh', 'reader_script.sh', 'update_reader.sh',
         'jellies_scripts.zip', 'parque-fw-14.zip', 'parque-fw-17.zip', 'parque-fw-19.zip',
-        'parque-v1.00.17-905e5f60e.zip', 'parque-v1.00.19-625929d22.zip', 'v1.00.14-f577de6e5.zip', 'parque-*.zip'
+        'parque-v1.00.17-905e5f60e.zip', 'parque-v1.00.19-625929d22.zip', 'v1.00.14-f577de6e5.zip',
     ]
 
     def do_GET(self):
