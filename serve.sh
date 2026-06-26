@@ -178,7 +178,7 @@ def generate_checksums():
 
 class GasakDistHandler(http.server.SimpleHTTPRequestHandler):
     WHITELIST = [
-        'gasak', 'gasak.exe' 'install.sh', 'install.ps1', 'serve.sh', 'decode_and_merge.py', 'decode_and_merge_win.py', 'deploy_parkee.py', 'deploy_parkee_win.py', 'settlement_rfs_win.py', 'log_cleaner.py', 'settlement_rfs.py', 'version.txt', 'server.properties', 'reinstall-vault.sh', 'reader_script.sh', 'update_reader.sh', 'jellies_scripts.zip', 'parque-fw-14.zip', 'parque-fw-17.zip', 'parque-fw-19.zip'
+        'gasak', 'gasak.exe', 'install.sh', 'install.ps1', 'serve.sh', 'decode_and_merge.py', 'decode_and_merge_win.py', 'deploy_parkee.py', 'deploy_parkee_win.py', 'settlement_rfs_win.', 'log_cleaner.py', 'settlement_rfs.py', 'version.txt', 'server.properties', 'reinstall-vault.sh', 'reader_script.sh', 'update_reader.sh', 'jellies_scripts.zip', 'parque-fw-14.zip', 'parque-fw-17.zip', 'parque-fw-19.zip'
     ]
 
     def do_GET(self):
