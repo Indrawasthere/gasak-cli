@@ -5,8 +5,8 @@
 #=====================================================================#
 #init reader
 USERNAME_READER="root"
-IP_READER="192.168.1.199"
-SSH_READER="$USERNAME_READER@$IP_READER"
+READER_COHERENT_IP="192.168.1.199"
+SSH_READER="$USERNAME_READER@$READER_COHERENT_IP"
 PASSWORD_READER="TRAN5act10n+953"
 
 NEW_IP="192.168.1.200/24"
