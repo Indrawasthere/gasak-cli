@@ -487,9 +487,9 @@ def print_dashboard():
 
 load_clients()
 
-socketserver.TCPServer.allow_reuse_address = True
+socketserver.ThreadingTCPServer.allow_reuse_address = True
 
-class ReusableTCPServer(socketserver.TCPServer):
+class ReusableThreadingTCPServer(socketserver.ThreadingTCPServer):
     def serve_forever(self):
         while True:
             self.handle_request()
@@ -497,19 +497,23 @@ class ReusableTCPServer(socketserver.TCPServer):
 try:
     print_dashboard()
 
-    with socketserver.TCPServer(('', PORT), GasakDistHandler) as httpd:
-        print(f"\033[0;32m[OK]\033[0m Server listening on 0.0.0.0:{PORT}", flush=True)
+    with ReusableThreadingTCPServer(('', PORT), GasakDistHandler) as httpd:
+        print(f"\033[0;32m[OK]\033[0m Server listening on 0.0.0.0:{PORT} (Multi-Threaded Mode Enabled)", flush=True)
         print(f"\033[0;32m[OK]\033[0m Install: curl -fsSL http://10.70.0.110:{PORT}/install.sh | bash", flush=True)
         print(f"\033[0;32m[OK]\033[0m Status: http://10.70.0.110:{PORT}/status", flush=True)
         print(f"\033[0;32m[OK]\033[0m Clients: http://10.70.0.110:{PORT}/clients", flush=True)
         print("", flush=True)
+
         httpd.serve_forever()
+
 except KeyboardInterrupt:
     print("\n\033[1;33m[!] Server dihentikan (Ctrl+C).\033[0m", flush=True)
     save_clients()
     sys.exit(0)
+
 except OSError as e:
     print(f"\n\033[0;31m[!] Gagal start server: {e}\033[0m", flush=True)
-    print(f"    Port {PORT} mungkin masih dipakai. Cek: sudo lsof -i:{PORT}", flush=True)
+    print(f"    Port {PORT} mungkin masih dipakai atau menggantung di background.", flush=True)
+    print(f"    Solusi: sudo kill -9 \$(sudo lsof -t -i:{PORT}) 2>/dev/null || true", flush=True)
     sys.exit(1)
 PYEOF

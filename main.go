@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	AppVersion = "1.5.4"
+	AppVersion = "1.5.5"
 )
 
 var (
@@ -586,13 +586,13 @@ func main() {
 			huh.NewOption("Settlement Decode", "settlement_decode"),
 			huh.NewOption("Inject Reader", "reader_script"),
 			huh.NewOption("Update Reader", "update_reader"),
+			huh.NewOption("Search Outline Docs", "search_outline"),
 		)
 
 		if tpUser.IsL2 {
 			options = append(options,
-				huh.NewOption("Superfile", "superfile"),
-				huh.NewOption("Search Outline Docs", "search_outline"),
 				huh.NewOption("Search Linear Issues", "search_linear"),
+				huh.NewOption("Superfile", "superfile"),
 				huh.NewOption("Crush", "crush_open"),
 				//huh.NewOption("GLPI", "open_glpi"),
 			)
@@ -670,9 +670,60 @@ func main() {
 		case "settlement_decode":
 			runSettlementDecode()
 		case "reader_script":
-			runReaderScript()
+			var readerType string
+			readerSubForm := huh.NewForm(
+				huh.NewGroup(
+					huh.NewSelect[string]().
+						Title("Pilih tipe Reader nya men:").
+						Options(
+							huh.NewOption("COHERENT", "coherent"),
+							huh.NewOption("PAX", "pax"),
+							huh.NewOption("← Balik ke Main Menu", "back"),
+						).
+						Value(&readerType),
+				),
+			).WithTheme(crushTheme())
+
+			if err := readerSubForm.Run(); err != nil || readerType == "back" {
+				break
+			}
+
+			switch readerType {
+			case "coherent":
+				runReaderScript()
+			case "pax":
+				fmt.Println()
+				logWarn("Tunggu update dari Mr Michael Martoyo yah")
+				fmt.Println()
+			}
+
 		case "update_reader":
-			runUpdateReader()
+			var readerType string
+			readerSubForm := huh.NewForm(
+				huh.NewGroup(
+					huh.NewSelect[string]().
+						Title("Pilih tipe Reader nya men:").
+						Options(
+							huh.NewOption("COHERENT", "coherent"),
+							huh.NewOption("PAX", "pax"),
+							huh.NewOption("← Balik ke Main Menu", "back"),
+						).
+						Value(&readerType),
+				),
+			).WithTheme(crushTheme())
+
+			if err := readerSubForm.Run(); err != nil || readerType == "back" {
+				break
+			}
+
+			switch readerType {
+			case "coherent":
+				runUpdateReader()
+			case "pax":
+				fmt.Println()
+				logWarn("Tunggu update dari Mr Michael Martoyo yah")
+				fmt.Println()
+			}
 		case "superfile":
 			runSuperfile()
 		case "crush_open":
@@ -711,13 +762,13 @@ func canAccess(tpUser *TeleportUser, action string) bool {
 		"settlement_rfs":    true,
 		"settlement_decode": true,
 		"reader_script":     true,
+		"update_reader":     true,
+		"search_outline":    true,
 		"exit":              true,
 	}
-
 	if tpUser.IsL2 {
 		return true
 	}
-
 	return l1Allowed[action]
 }
 
@@ -806,95 +857,169 @@ func runLocationLookup() {
 	}
 
 	options := make([]huh.Option[string], 0, len(locs)+1)
-	options = append(options, huh.NewOption("Ketik aja nama lokasi atau unicode nya men", "back"))
+	options = append(options, huh.NewOption("← Balik ke Main Menu", "back"))
 	for _, l := range locs {
 		label := fmt.Sprintf("%-8s | %-45s | %s", l.Unicode, truncate(l.Nama, 45), l.IP)
 		options = append(options, huh.NewOption(label, l.Unicode))
 	}
 
-	var selectedUnicode string
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Pilih lokasi yang mau di-lookup:").
-				Description(fmt.Sprintf("%d lokasi aktif ditemukan", len(locs))).
-				Options(options...).
-				Value(&selectedUnicode).
-				Filtering(true),
-		),
-	).WithTheme(crushTheme())
+	for {
+		var selectedUnicode string
+		form := huh.NewForm(
+			huh.NewGroup(
+				huh.NewSelect[string]().
+					Title("Pilih lokasi yang mau di-lookup:").
+					Description(fmt.Sprintf("%d lokasi aktif ditemukan", len(locs))).
+					Options(options...).
+					Value(&selectedUnicode).
+					Filtering(true),
+			),
+		).WithTheme(crushTheme())
 
-	if err := form.Run(); err != nil {
-		logWarn("Lookup dibatalkan.")
-		return
-	}
-
-	if selectedUnicode == "back" {
-		return
-	}
-
-	var selectedLoc *Location
-	for _, l := range locs {
-		if l.Unicode == selectedUnicode {
-			loc := l
-			selectedLoc = &loc
-			break
+		if err := form.Run(); err != nil || selectedUnicode == "back" {
+			return
 		}
+
+		var selectedLoc *Location
+		for _, l := range locs {
+			if l.Unicode == selectedUnicode {
+				loc := l
+				selectedLoc = &loc
+				break
+			}
+		}
+
+		if selectedLoc == nil {
+			logErr("Lokasi kagak ketemu men!")
+			continue
+		}
+
+		logOK(fmt.Sprintf("Target: %s [%s]", selectedLoc.Nama, strings.ToUpper(selectedLoc.Unicode)))
+		fmt.Println()
+
+		if VaultServerURL == "" {
+			logErr("Vault server URL belum di-set men!")
+			logInfo("Pastikan GASAK_VAULT_URL ada di .env atau vault")
+			fmt.Println()
+			fmt.Println(dimStyle.Render("  [enter] balik ke pilih lokasi..."))
+			fmt.Scanln()
+			showMiniHeader()
+			continue
+		}
+
+		if GasakDistToken == "" {
+			logErr("Gasak dist token belum di-set men!")
+			logInfo("Pastikan GASAK_DIST_TOKEN ada di .env atau vault")
+			fmt.Println()
+			fmt.Println(dimStyle.Render("  [enter] balik ke pilih lokasi..."))
+			fmt.Scanln()
+			showMiniHeader()
+			continue
+		}
+
+		logInfo("Fetching lokasi via API Vault, wait up men...")
+		fmt.Println()
+
+		client := &http.Client{Timeout: 30 * time.Second}
+		req, err := http.NewRequest("GET",
+			fmt.Sprintf(VaultServerURL+"/api/ploc?keyword=%s", strings.ToLower(selectedLoc.Unicode)),
+			nil,
+		)
+		if err != nil {
+			logErr("Gagal bikin request men: " + err.Error())
+			fmt.Println()
+			fmt.Println(dimStyle.Render("  [enter] balik ke pilih lokasi..."))
+			fmt.Scanln()
+			showMiniHeader()
+			continue
+		}
+		req.Header.Set("X-Gasak-Token", GasakDistToken)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			logErr("Vault server ga bisa dihubungi men: " + err.Error())
+			fmt.Println()
+			fmt.Println(dimStyle.Render("  [enter] balik ke pilih lokasi..."))
+			fmt.Scanln()
+			showMiniHeader()
+			continue
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			logErr("Gagal baca response men: " + err.Error())
+			fmt.Println()
+			fmt.Println(dimStyle.Render("  [enter] balik ke pilih lokasi..."))
+			fmt.Scanln()
+			showMiniHeader()
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			logErr(fmt.Sprintf("Vault server error men (%d): %s", resp.StatusCode, string(body)))
+			fmt.Println()
+			fmt.Println(dimStyle.Render("  [enter] balik ke pilih lokasi..."))
+			fmt.Scanln()
+			showMiniHeader()
+			continue
+		}
+
+		fmt.Println(string(body))
+		fmt.Println()
+
+		for {
+			var subAction string
+			subForm := huh.NewForm(
+				huh.NewGroup(
+					huh.NewSelect[string]().
+						Title(fmt.Sprintf("Aksi untuk %s:", selectedLoc.Nama)).
+						Options(
+							huh.NewOption("SSH ke Lokasi", "ssh_to"),
+							huh.NewOption("← Balik ke Pilih Lokasi", "back"),
+						).
+						Value(&subAction),
+				),
+			).WithTheme(crushTheme())
+
+			if err := subForm.Run(); err != nil || subAction == "back" {
+				break
+			}
+
+			switch subAction {
+			case "ssh_to":
+				if SshPass == "" {
+					logErr("SshPass belum di-set men!")
+					logInfo("Pastikan PARKEE_SSH_PASS ada di .env atau vault")
+					fmt.Println()
+					fmt.Println(dimStyle.Render("  [enter] balik ke menu aksi..."))
+					fmt.Scanln()
+					showMiniHeader()
+					fmt.Println(string(body))
+					fmt.Println()
+					continue
+				}
+				logInfo(fmt.Sprintf("SSH @%s ...", selectedLoc.IP))
+				fmt.Println()
+				runInteractive(
+					"sshpass",
+					"-p", SshPass,
+					"ssh",
+					"-o", "StrictHostKeyChecking=no",
+					"-o", "ConnectTimeout=5",
+					fmt.Sprintf("support@%s", selectedLoc.IP),
+				)
+				fmt.Println()
+				fmt.Println(dimStyle.Render("  [enter] balik ke menu aksi..."))
+				fmt.Scanln()
+				showMiniHeader()
+				fmt.Println(string(body))
+				fmt.Println()
+			}
+		}
+
+		showMiniHeader()
 	}
-
-	if selectedLoc == nil {
-		logErr("Lokasi kagak ketemu men!")
-		return
-	}
-
-	logOK(fmt.Sprintf("Target: %s [%s]", selectedLoc.Nama, strings.ToUpper(selectedLoc.Unicode)))
-	fmt.Println()
-
-	if VaultServerURL == "" {
-		logErr("Vault server URL belum di-set men!")
-		logInfo("Pastikan GASAK_VAULT_URL ada di .env atau vault")
-		return
-	}
-
-	if GasakDistToken == "" {
-		logErr("Gasak dist token belum di-set men!")
-		logInfo("Pastikan GASAK_DIST_TOKEN ada di .env atau vault")
-		return
-	}
-
-	logInfo("Fetching lokasi via API Vault, wait up men...")
-	fmt.Println()
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	req, err := http.NewRequest("GET",
-		fmt.Sprintf(VaultServerURL+"/api/ploc?keyword=%s", strings.ToLower(selectedLoc.Unicode)),
-		nil,
-	)
-	if err != nil {
-		logErr("Gagal bikin request men: " + err.Error())
-		return
-	}
-	req.Header.Set("X-Gasak-Token", GasakDistToken)
-
-	resp, err := client.Do(req)
-	if err != nil {
-		logErr("Vault server ga bisa dihubungi men: " + err.Error())
-		return
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		logErr("Gagal baca response men: " + err.Error())
-		return
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		logErr(fmt.Sprintf("Vault server error men (%d): %s", resp.StatusCode, string(body)))
-		return
-	}
-
-	fmt.Println(string(body))
 }
 
 func executeSingleLocationMenu(selected *Location) {
@@ -954,7 +1079,7 @@ func executeSingleLocationMenu(selected *Location) {
 
 		switch subAction {
 		case "ssh_to":
-			logInfo(fmt.Sprintf("SSH as support@%s ...", selected.IP))
+			logInfo(fmt.Sprintf("SSH @%s ...", selected.IP))
 			fmt.Println()
 
 			runInteractive(
@@ -1564,76 +1689,87 @@ func runSuperfile() {
 		return
 	}
 
-	opts := make([]huh.Option[string], 0, len(superfilePaths))
+	opts := make([]huh.Option[string], 0, len(superfilePaths)+1)
+	opts = append(opts, huh.NewOption("← Balik ke Main Menu", "back"))
 	for _, p := range superfilePaths {
 		opts = append(opts, huh.NewOption(p.Label, p.Path))
 	}
 
-	var selectedPath string
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Mau buka direktori mana di Superfile?").
-				Description("Superfile akan terbuka langsung di path yang lu pilih.").
-				Options(opts...).
-				Value(&selectedPath),
-		),
-	).WithTheme(crushTheme())
-
-	if err := form.Run(); err != nil {
-		logWarn("Dibatalkan.")
-		return
-	}
-
-	homeDir := os.Getenv("HOME")
-	switch selectedPath {
-	case "downloads":
-		selectedPath = filepath.Join(homeDir, "Downloads")
-	case "documents":
-		selectedPath = filepath.Join(homeDir, "Documents")
-	case "custom":
-		var customPath string
-		customForm := huh.NewForm(
+	for {
+		var selectedPath string
+		form := huh.NewForm(
 			huh.NewGroup(
-				huh.NewInput().
-					Title("Masukkan path direktori:").
-					Placeholder("/path/to/directory").
-					Value(&customPath),
+				huh.NewSelect[string]().
+					Title("Mau buka direktori mana di Superfile?").
+					Description("Superfile akan terbuka langsung di path yang lu pilih.").
+					Options(opts...).
+					Value(&selectedPath),
 			),
 		).WithTheme(crushTheme())
 
-		if err := customForm.Run(); err != nil || strings.TrimSpace(customPath) == "" {
-			logWarn("Dibatalkan.")
+		if err := form.Run(); err != nil || selectedPath == "back" {
 			return
 		}
-		selectedPath = strings.TrimSpace(customPath)
-	}
 
-	if info, statErr := os.Stat(selectedPath); statErr != nil || !info.IsDir() {
-		logErr(fmt.Sprintf("Path tidak ditemukan atau bukan direktori: %s", selectedPath))
-		logInfo("Cek lagi path-nya men, mungkin direktori belum ada di remote ini.")
-		return
-	}
+		homeDir := os.Getenv("HOME")
+		resolvedPath := selectedPath
+		switch selectedPath {
+		case "downloads":
+			resolvedPath = filepath.Join(homeDir, "Downloads")
+		case "documents":
+			resolvedPath = filepath.Join(homeDir, "Documents")
+		case "custom":
+			var customPath string
+			customForm := huh.NewForm(
+				huh.NewGroup(
+					huh.NewInput().
+						Title("Masukkan path direktori:").
+						Placeholder("/path/to/directory").
+						Value(&customPath),
+				),
+			).WithTheme(crushTheme())
 
-	fmt.Println()
-	logInfo(fmt.Sprintf("Buka Superfile di: %s", selectedPath))
-	fmt.Println(dimStyle.Render("  Tekan 'q' di dalam Superfile untuk balik ke GASAK."))
-	fmt.Println()
+			if err := customForm.Run(); err != nil || strings.TrimSpace(customPath) == "" {
+				continue
+			}
+			resolvedPath = strings.TrimSpace(customPath)
+		}
 
-	cmd := exec.Command(spfPath, selectedPath)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+		if info, statErr := os.Stat(resolvedPath); statErr != nil || !info.IsDir() {
+			logErr(fmt.Sprintf("Path tidak ditemukan atau bukan direktori: %s", resolvedPath))
+			logInfo("Cek lagi path-nya men, mungkin direktori belum ada di remote ini.")
+			fmt.Println()
+			fmt.Println(dimStyle.Render("  [enter] balik ke pilih path..."))
+			fmt.Scanln()
+			showMiniHeader()
+			continue
+		}
 
-	if err := cmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		fmt.Println()
+		logInfo(fmt.Sprintf("Buka Superfile di: %s", resolvedPath))
+		fmt.Println(dimStyle.Render("  Tekan 'q' di dalam Superfile untuk balik ke GASAK."))
+		fmt.Println()
+
+		cmd := exec.Command(spfPath, resolvedPath)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		if err := cmd.Run(); err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+				logOK("Superfile ditutup. Balik ke GASAK.")
+			} else {
+				logErr("Superfile exited dengan error: " + err.Error())
+			}
+		} else {
 			logOK("Superfile ditutup. Balik ke GASAK.")
-			return
 		}
-		logErr("Superfile exited dengan error: " + err.Error())
-		return
+
+		fmt.Println()
+		fmt.Println(dimStyle.Render("  [enter] balik ke pilih path..."))
+		fmt.Scanln()
+		showMiniHeader()
 	}
-	logOK("Superfile ditutup. Balik ke GASAK.")
 }
 
 func runLogCleaner() {
@@ -1715,51 +1851,6 @@ func runFetchLog() {
 		return
 	}
 
-	options := make([]huh.Option[string], 0, len(locs)+1)
-	options = append(options, huh.NewOption("Ketik aja nama lokasi atau unicode nya men ", "back"))
-	for _, l := range locs {
-		label := fmt.Sprintf("%-8s | %-45s | %s", l.Unicode, truncate(l.Nama, 45), l.IP)
-		options = append(options, huh.NewOption(label, l.Unicode))
-	}
-
-	var selectedUnicode string
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Pilih lokasi yang mau diambil log-nya men:").
-				Description(fmt.Sprintf("%d lokasi aktif ditemukan", len(locs))).
-				Options(options...).
-				Value(&selectedUnicode).
-				Filtering(true),
-		),
-	).WithTheme(crushTheme())
-
-	if err := form.Run(); err != nil {
-		logWarn("Proses pencarian lokasi dibatalkan.")
-		return
-	}
-
-	if selectedUnicode == "back" {
-		return
-	}
-
-	var selectedLoc *Location
-	for _, l := range locs {
-		if l.Unicode == selectedUnicode {
-			loc := l
-			selectedLoc = &loc
-			break
-		}
-	}
-
-	if selectedLoc == nil {
-		logErr("Lokasi kagak ketemu men!")
-		return
-	}
-
-	logOK(fmt.Sprintf("Target Terpilih: %s [%s] — %s", selectedLoc.Nama, strings.ToUpper(selectedLoc.Unicode), selectedLoc.IP))
-	fmt.Println()
-
 	isUserL2 := false
 	currentUsername := "support"
 	if os.Getenv("GASAK_ROLE") == "admin" || os.Getenv("GASAK_ROLE") == "l2" || os.Getenv("PARKEE_SSH_USER") == "server" {
@@ -1772,45 +1863,88 @@ func runFetchLog() {
 		IsL2:     isUserL2,
 	}
 
-	var logOpts []huh.Option[int]
-	logOpts = append(logOpts, huh.NewOption("Ketik aja nama lokasi atau unicode nya men", -1))
-	for idx, src := range logSources {
-		if src.AllowedForL2 && !tpUser.IsL2 {
+	locOptions := make([]huh.Option[string], 0, len(locs)+1)
+	locOptions = append(locOptions, huh.NewOption("← Balik ke Main Menu", "back"))
+	for _, l := range locs {
+		label := fmt.Sprintf("%-8s | %-45s | %s", l.Unicode, truncate(l.Nama, 45), l.IP)
+		locOptions = append(locOptions, huh.NewOption(label, l.Unicode))
+	}
+
+	for {
+		var selectedUnicode string
+		locForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewSelect[string]().
+					Title("Pilih lokasi yang mau diambil log-nya men:").
+					Description(fmt.Sprintf("%d lokasi aktif ditemukan", len(locs))).
+					Options(locOptions...).
+					Value(&selectedUnicode).
+					Filtering(true),
+			),
+		).WithTheme(crushTheme())
+
+		if err := locForm.Run(); err != nil || selectedUnicode == "back" {
+			return
+		}
+
+		var selectedLoc *Location
+		for _, l := range locs {
+			if l.Unicode == selectedUnicode {
+				loc := l
+				selectedLoc = &loc
+				break
+			}
+		}
+
+		if selectedLoc == nil {
+			logErr("Lokasi kagak ketemu men!")
 			continue
 		}
-		logOpts = append(logOpts, huh.NewOption(src.Name, idx))
-	}
 
-	var selectedLogIdx int
-	logForm := huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[int]().
-				Title(fmt.Sprintf("Pilih tipe log dari %s yang mau diambil:", selectedLoc.Nama)).
-				Options(logOpts...).
-				Value(&selectedLogIdx),
-		),
-	).WithTheme(crushTheme())
+		logOK(fmt.Sprintf("Target Terpilih: %s [%s] — %s", selectedLoc.Nama, strings.ToUpper(selectedLoc.Unicode), selectedLoc.IP))
+		fmt.Println()
 
-	if err := logForm.Run(); err != nil {
-		logWarn("Proses pemilihan log dibatalkan.")
-		return
-	}
+		var logOpts []huh.Option[int]
+		for idx, src := range logSources {
+			if src.AllowedForL2 && !tpUser.IsL2 {
+				continue
+			}
+			logOpts = append(logOpts, huh.NewOption(src.Name, idx))
+		}
+		logOpts = append(logOpts, huh.NewOption("← Balik ke Pilih Lokasi", -1))
 
-	if selectedLogIdx == -1 {
-		runFetchLog()
-		return
-	}
+		for {
+			var selectedLogIdx int
+			logForm := huh.NewForm(
+				huh.NewGroup(
+					huh.NewSelect[int]().
+						Title(fmt.Sprintf("Pilih tipe log dari %s yang mau diambil:", selectedLoc.Nama)).
+						Options(logOpts...).
+						Value(&selectedLogIdx),
+				),
+			).WithTheme(crushTheme())
 
-	chosenLog := logSources[selectedLogIdx]
+			if err := logForm.Run(); err != nil || selectedLogIdx == -1 {
+				break
+			}
 
-	if chosenLog.IsAgentLog {
-		logInfo("Bentar orchestrator cluster gate nya lagi jalan men")
-		fetchAgentGateLog(tpUser, selectedLoc, chosenLog.Path, chosenLog.Name)
-	} else {
-		if chosenLog.IsDir {
-			fetchLogFromDir(tpUser, selectedLoc, chosenLog.Path, chosenLog.Name)
-		} else {
-			fetchSingleFile(tpUser, selectedLoc, chosenLog.Path, chosenLog.Name)
+			chosenLog := logSources[selectedLogIdx]
+
+			if chosenLog.IsAgentLog {
+				logInfo("Bentar orchestrator cluster gate nya lagi jalan men")
+				fetchAgentGateLog(tpUser, selectedLoc, chosenLog.Path, chosenLog.Name)
+			} else {
+				if chosenLog.IsDir {
+					fetchLogFromDir(tpUser, selectedLoc, chosenLog.Path, chosenLog.Name)
+				} else {
+					fetchSingleFile(tpUser, selectedLoc, chosenLog.Path, chosenLog.Name)
+				}
+			}
+
+			fmt.Println()
+			fmt.Println(dimStyle.Render("  [enter] balik ke pilih log..."))
+			fmt.Scanln()
+			showMiniHeader()
 		}
 	}
 }
@@ -1830,33 +1964,40 @@ func fetchLogFromDir(tpUser *TeleportUser, loc *Location, remoteDir string, logL
 		files = files[:maxFiles]
 	}
 
-	var fileOpts []huh.Option[string]
+	fileOpts := make([]huh.Option[string], 0, len(files)+1)
+	fileOpts = append(fileOpts, huh.NewOption("← Balik ke Pilih Log Type", "back"))
 	for _, f := range files {
 		fileOpts = append(fileOpts, huh.NewOption(f, f))
 	}
 
-	var selectedFile string
-	fileForm := huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title(fmt.Sprintf("Pilih file log (%s):", logLabel)).
-				Description(fmt.Sprintf("%d file ditemukan di %s", len(files), remoteDir)).
-				Options(fileOpts...).
-				Value(&selectedFile).
-				Filtering(true),
-		),
-	).WithTheme(crushTheme())
+	for {
+		var selectedFile string
+		fileForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewSelect[string]().
+					Title(fmt.Sprintf("Pilih file log (%s):", logLabel)).
+					Description(fmt.Sprintf("%d file ditemukan di %s", len(files), remoteDir)).
+					Options(fileOpts...).
+					Value(&selectedFile).
+					Filtering(true),
+			),
+		).WithTheme(crushTheme())
 
-	if err := fileForm.Run(); err != nil {
-		logWarn("Dibatalin.")
-		return
+		if err := fileForm.Run(); err != nil || selectedFile == "back" {
+			return
+		}
+
+		fmt.Println()
+
+		actualFile := strings.Fields(selectedFile)[0]
+		remotePath := remoteDir + "/" + actualFile
+		scpFile(tpUser, loc, remotePath, actualFile)
+
+		fmt.Println()
+		fmt.Println(dimStyle.Render("  [enter] balik ke pilih file..."))
+		fmt.Scanln()
+		showMiniHeader()
 	}
-
-	fmt.Println()
-
-	actualFile := strings.Fields(selectedFile)[0]
-	remotePath := remoteDir + "/" + actualFile
-	scpFile(tpUser, loc, remotePath, actualFile)
 }
 
 func fetchSingleFile(tpUser *TeleportUser, loc *Location, remotePath string, logLabel string) {
@@ -2204,74 +2345,87 @@ func fetchAgentGateLog(tpUser *TeleportUser, loc *Location, remotePath string, l
 	logOK(fmt.Sprintf("%d gate ada nich.", len(gates)))
 	fmt.Println()
 
-	var gateOpts []huh.Option[string]
+	gateOpts := make([]huh.Option[string], 0, len(gates)+1)
+	gateOpts = append(gateOpts, huh.NewOption("← Balik ke Pilih Log Type", "back"))
 	for _, g := range gates {
 		label := fmt.Sprintf("%-25s | %s", g.UserPC, g.IP)
 		gateOpts = append(gateOpts, huh.NewOption(label, g.UserPC))
 	}
 
-	var selectedGateUser string
-	gateForm := huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title(fmt.Sprintf("Pilih Gate untuk %s [%s]:", loc.Nama, loc.Unicode)).
-				Description(fmt.Sprintf("%d gate aktif (30 hari terakhir)", len(gates))).
-				Options(gateOpts...).
-				Value(&selectedGateUser).
-				Filtering(true),
-		),
-	).WithTheme(crushTheme())
+	for {
+		var selectedGateUser string
+		gateForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewSelect[string]().
+					Title(fmt.Sprintf("Pilih Gate untuk %s [%s]:", loc.Nama, loc.Unicode)).
+					Description(fmt.Sprintf("%d gate aktif (30 hari terakhir)", len(gates))).
+					Options(gateOpts...).
+					Value(&selectedGateUser).
+					Filtering(true),
+			),
+		).WithTheme(crushTheme())
 
-	if err := gateForm.Run(); err != nil {
-		logWarn("Dibatalin.")
-		return
-	}
+		if err := gateForm.Run(); err != nil || selectedGateUser == "back" {
+			return
+		}
 
-	var selectedGate GateInfo
-	for _, g := range gates {
-		if g.UserPC == selectedGateUser {
-			selectedGate = g
-			break
+		var selectedGate GateInfo
+		for _, g := range gates {
+			if g.UserPC == selectedGateUser {
+				selectedGate = g
+				break
+			}
+		}
+
+		fmt.Println()
+
+		logInfo(fmt.Sprintf("Listing %s di gate %s [%s]...", logLabel, selectedGate.UserPC, selectedGate.IP))
+
+		files, err := listGateLogFiles(tpUser, loc, selectedGate, remotePath)
+		if err != nil {
+			logErr("Gagal list file di gate: " + err.Error())
+			logWarn("Cek: gate PC nyala ga?")
+			fmt.Println()
+			fmt.Println(dimStyle.Render("  [enter] balik ke pilih gate..."))
+			fmt.Scanln()
+			showMiniHeader()
+			continue
+		}
+
+		fileOpts := make([]huh.Option[string], 0, len(files)+1)
+		fileOpts = append(fileOpts, huh.NewOption("← Balik ke Pilih Gate", "back"))
+		for _, f := range files {
+			fileOpts = append(fileOpts, huh.NewOption(f, f))
+		}
+
+		for {
+			var selectedFile string
+			fileForm := huh.NewForm(
+				huh.NewGroup(
+					huh.NewSelect[string]().
+						Title(fmt.Sprintf("Pilih file log dari %s:", selectedGate.UserPC)).
+						Description(fmt.Sprintf("%d file di %s", len(files), remotePath)).
+						Options(fileOpts...).
+						Value(&selectedFile).
+						Filtering(true),
+				),
+			).WithTheme(crushTheme())
+
+			if err := fileForm.Run(); err != nil || selectedFile == "back" {
+				break
+			}
+
+			fmt.Println()
+
+			actualFile := strings.Fields(selectedFile)[0]
+			scpGateFileViaServerPos(tpUser, loc, selectedGate, remotePath+"/"+actualFile, actualFile)
+
+			fmt.Println()
+			fmt.Println(dimStyle.Render("  [enter] balik ke pilih file..."))
+			fmt.Scanln()
+			showMiniHeader()
 		}
 	}
-
-	fmt.Println()
-
-	logInfo(fmt.Sprintf("Listing %s di gate %s [%s]...", logLabel, selectedGate.UserPC, selectedGate.IP))
-
-	files, err := listGateLogFiles(tpUser, loc, selectedGate, remotePath)
-	if err != nil {
-		logErr("Gagal list file di gate: " + err.Error())
-		logWarn("Cek: gate PC nyala ga?")
-		return
-	}
-
-	var fileOpts []huh.Option[string]
-	for _, f := range files {
-		fileOpts = append(fileOpts, huh.NewOption(f, f))
-	}
-
-	var selectedFile string
-	fileForm := huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title(fmt.Sprintf("Pilih file log dari %s:", selectedGate.UserPC)).
-				Description(fmt.Sprintf("%d file di %s", len(files), remotePath)).
-				Options(fileOpts...).
-				Value(&selectedFile).
-				Filtering(true),
-		),
-	).WithTheme(crushTheme())
-
-	if err := fileForm.Run(); err != nil {
-		logWarn("Dibatalin.")
-		return
-	}
-
-	fmt.Println()
-
-	actualFile := strings.Fields(selectedFile)[0]
-	scpGateFileViaServerPos(tpUser, loc, selectedGate, remotePath+"/"+actualFile, actualFile)
 }
 
 func scpGateFileViaServerPos(tpUser *TeleportUser, loc *Location, gate GateInfo, remoteFilePath string, filename string) {
@@ -2529,166 +2683,186 @@ func runUpdateReader() {
 		return
 	}
 
-	options := make([]huh.Option[string], 0, len(locs)+1)
-	options = append(options, huh.NewOption("← Back to Main Menu", "back"))
+	locOptions := make([]huh.Option[string], 0, len(locs)+1)
+	locOptions = append(locOptions, huh.NewOption("← Balik ke Main Menu", "back"))
 	for _, l := range locs {
 		label := fmt.Sprintf("%-8s | %-45s | %s", l.Unicode, truncate(l.Nama, 45), l.IP)
-		options = append(options, huh.NewOption(label, l.Unicode))
+		locOptions = append(locOptions, huh.NewOption(label, l.Unicode))
 	}
 
-	var selectedUnicode string
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Pilih lokasi update reader:").
-				Description(fmt.Sprintf("%d lokasi aktif ditemukan", len(locs))).
-				Options(options...).
-				Value(&selectedUnicode).
-				Filtering(true),
-		),
-	).WithTheme(crushTheme())
+	for {
+		var selectedUnicode string
+		form := huh.NewForm(
+			huh.NewGroup(
+				huh.NewSelect[string]().
+					Title("Pilih lokasi update reader:").
+					Description(fmt.Sprintf("%d lokasi aktif ditemukan", len(locs))).
+					Options(locOptions...).
+					Value(&selectedUnicode).
+					Filtering(true),
+			),
+		).WithTheme(crushTheme())
 
-	if err := form.Run(); err != nil {
-		logWarn("Dibatalkan.")
-		return
-	}
-
-	if selectedUnicode == "back" {
-		return
-	}
-
-	var selectedLoc *Location
-	for _, l := range locs {
-		if l.Unicode == selectedUnicode {
-			loc := l
-			selectedLoc = &loc
-			break
+		if err := form.Run(); err != nil || selectedUnicode == "back" {
+			return
 		}
-	}
 
-	if selectedLoc == nil {
-		logErr("Lokasi kagak ketemu men!")
-		return
-	}
-
-	logOK(fmt.Sprintf("Target: %s [%s]", selectedLoc.Nama, strings.ToUpper(selectedLoc.Unicode)))
-	fmt.Println()
-
-	logInfo("Fetching daftar gate via SSH...")
-	gates, err := queryGatesViaSSH(selectedLoc)
-	if err != nil {
-		logErr("Gagal fetch gates men: " + err.Error())
-		logWarn("Cek: server lokasi nyala ga? IP ZT reachable?")
-		return
-	}
-
-	if len(gates) == 0 {
-		logWarn("Gate kagak ada yang aktif 30 hari terakhir men.")
-		return
-	}
-
-	logOK(fmt.Sprintf("%d gate ditemukan.", len(gates)))
-	fmt.Println()
-
-	var gateOpts []huh.Option[string]
-	for _, g := range gates {
-		label := fmt.Sprintf("%-25s | %s", g.UserPC, g.IP)
-		gateOpts = append(gateOpts, huh.NewOption(label, g.UserPC))
-	}
-
-	var selectedGateUser string
-	gateForm := huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Pilih Gate untuk update reader:").
-				Description(fmt.Sprintf("%d gate aktif (30 hari terakhir)", len(gates))).
-				Options(gateOpts...).
-				Value(&selectedGateUser).
-				Filtering(true),
-		),
-	).WithTheme(crushTheme())
-
-	if err := gateForm.Run(); err != nil {
-		logWarn("Dibatalin.")
-		return
-	}
-
-	var selectedGate GateInfo
-	for _, g := range gates {
-		if g.UserPC == selectedGateUser {
-			selectedGate = g
-			break
+		var selectedLoc *Location
+		for _, l := range locs {
+			if l.Unicode == selectedUnicode {
+				loc := l
+				selectedLoc = &loc
+				break
+			}
 		}
-	}
 
-	fmt.Println()
-	logOK(fmt.Sprintf("Gate Terpilih: %s [%s]", selectedGate.UserPC, selectedGate.IP))
-	fmt.Println()
+		if selectedLoc == nil {
+			logErr("Lokasi kagak ketemu men!")
+			continue
+		}
 
-	homeDir, _ := os.UserHomeDir()
-	scriptPath := filepath.Join(homeDir, "gasak-dist", "update_reader.sh")
-	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
-		logErr("Script update_reader.sh gaada nih men: " + scriptPath)
-		logInfo("Pastiin update_reader.sh ada di ~/gasak-dist/")
-		return
-	}
+		logOK(fmt.Sprintf("Target: %s [%s]", selectedLoc.Nama, strings.ToUpper(selectedLoc.Unicode)))
+		fmt.Println()
 
-	gateUser := strings.ToLower(selectedGate.UserPC)
-	gatePass := fmt.Sprintf("pc%sclient", strings.ToLower(selectedLoc.Unicode))
-	proxyCmd := fmt.Sprintf("sshpass -p %s ssh -o StrictHostKeyChecking=no -W %%h:%%p support@%s", SshPass, selectedLoc.IP)
-	isZT := strings.HasPrefix(selectedGate.IP, "10.70.")
+		logInfo("Fetching daftar gate via SSH...")
+		gates, err := queryGatesViaSSH(selectedLoc)
+		if err != nil {
+			logErr("Gagal fetch gates men: " + err.Error())
+			logWarn("Cek: server lokasi nyala ga? IP ZT reachable?")
+			fmt.Println()
+			fmt.Println(dimStyle.Render("  [enter] balik ke pilih lokasi..."))
+			fmt.Scanln()
+			showMiniHeader()
+			continue
+		}
 
-	logInfo("Uploading update_reader.sh ke gate...")
-	var scpCmd *exec.Cmd
-	if isZT {
-		scpCmd = exec.Command("sshpass", "-p", gatePass,
-			"scp", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=30",
-			scriptPath, fmt.Sprintf("%s@%s:~/update_reader.sh", gateUser, selectedGate.IP),
-		)
-	} else {
-		scpCmd = exec.Command("sshpass", "-p", gatePass,
-			"scp", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=30",
-			"-o", fmt.Sprintf("ProxyCommand=%s", proxyCmd),
-			scriptPath, fmt.Sprintf("%s@%s:~/update_reader.sh", gateUser, selectedGate.IP),
-		)
-	}
-	scpCmd.Stdout = os.Stdout
-	scpCmd.Stderr = os.Stderr
-	if err := scpCmd.Run(); err != nil {
-		logErr("Gagal upload script ke gate: " + err.Error())
-		return
-	}
-	logOK("Script uploaded ke gate")
+		if len(gates) == 0 {
+			logWarn("Gate kagak ada yang aktif 30 hari terakhir men.")
+			fmt.Println()
+			fmt.Println(dimStyle.Render("  [enter] balik ke pilih lokasi..."))
+			fmt.Scanln()
+			showMiniHeader()
+			continue
+		}
 
-	logInfo("Running update_reader.sh di gate, wait men...")
-	fmt.Println()
+		logOK(fmt.Sprintf("%d gate ditemukan.", len(gates)))
+		fmt.Println()
 
-	remoteCmd := "chmod +x ~/update_reader.sh && bash ~/update_reader.sh"
+		gateOpts := make([]huh.Option[string], 0, len(gates)+1)
+		gateOpts = append(gateOpts, huh.NewOption("← Balik ke Pilih Lokasi", "back"))
+		for _, g := range gates {
+			label := fmt.Sprintf("%-25s | %s", g.UserPC, g.IP)
+			gateOpts = append(gateOpts, huh.NewOption(label, g.UserPC))
+		}
 
-	var sshCmd *exec.Cmd
-	if isZT {
-		sshCmd = exec.Command("sshpass", "-p", gatePass,
-			"ssh", "-t", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=30", // Tambahkan flag -t disini
-			fmt.Sprintf("%s@%s", gateUser, selectedGate.IP),
-			remoteCmd,
-		)
-	} else {
-		sshCmd = exec.Command("sshpass", "-p", gatePass,
-			"ssh", "-t", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=30", // Tambahkan flag -t disini
-			"-o", fmt.Sprintf("ProxyCommand=%s", proxyCmd),
-			fmt.Sprintf("%s@%s", gateUser, selectedGate.IP),
-			remoteCmd,
-		)
-	}
+		for {
+			var selectedGateUser string
+			gateForm := huh.NewForm(
+				huh.NewGroup(
+					huh.NewSelect[string]().
+						Title("Pilih Gate untuk update reader:").
+						Description(fmt.Sprintf("%d gate aktif (30 hari terakhir)", len(gates))).
+						Options(gateOpts...).
+						Value(&selectedGateUser).
+						Filtering(true),
+				),
+			).WithTheme(crushTheme())
 
-	sshCmd.Stdout = os.Stdout
-	sshCmd.Stderr = os.Stderr
-	sshCmd.Stdin = os.Stdin
+			if err := gateForm.Run(); err != nil || selectedGateUser == "back" {
+				break
+			}
 
-	if err := sshCmd.Run(); err != nil {
-		logWarn("Script exited: " + err.Error())
-	} else {
-		logOK("Update reader selesai men!")
+			var selectedGate GateInfo
+			for _, g := range gates {
+				if g.UserPC == selectedGateUser {
+					selectedGate = g
+					break
+				}
+			}
+
+			fmt.Println()
+			logOK(fmt.Sprintf("Gate Terpilih: %s [%s]", selectedGate.UserPC, selectedGate.IP))
+			fmt.Println()
+
+			homeDir, _ := os.UserHomeDir()
+			scriptPath := filepath.Join(homeDir, "gasak-dist", "update_reader.sh")
+			if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
+				logErr("Script update_reader.sh gaada nih men: " + scriptPath)
+				logInfo("Pastiin update_reader.sh ada di ~/gasak-dist/")
+				fmt.Println()
+				fmt.Println(dimStyle.Render("  [enter] balik ke pilih gate..."))
+				fmt.Scanln()
+				showMiniHeader()
+				continue
+			}
+
+			gateUser := strings.ToLower(selectedGate.UserPC)
+			gatePass := fmt.Sprintf("pc%sclient", strings.ToLower(selectedLoc.Unicode))
+			proxyCmd := fmt.Sprintf("sshpass -p %s ssh -o StrictHostKeyChecking=no -W %%h:%%p support@%s", SshPass, selectedLoc.IP)
+			isZT := strings.HasPrefix(selectedGate.IP, "10.70.")
+
+			logInfo("Uploading update_reader.sh ke gate...")
+			var scpCmd *exec.Cmd
+			if isZT {
+				scpCmd = exec.Command("sshpass", "-p", gatePass,
+					"scp", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=30",
+					scriptPath, fmt.Sprintf("%s@%s:~/update_reader.sh", gateUser, selectedGate.IP),
+				)
+			} else {
+				scpCmd = exec.Command("sshpass", "-p", gatePass,
+					"scp", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=30",
+					"-o", fmt.Sprintf("ProxyCommand=%s", proxyCmd),
+					scriptPath, fmt.Sprintf("%s@%s:~/update_reader.sh", gateUser, selectedGate.IP),
+				)
+			}
+			scpCmd.Stdout = os.Stdout
+			scpCmd.Stderr = os.Stderr
+			if err := scpCmd.Run(); err != nil {
+				logErr("Gagal upload script ke gate: " + err.Error())
+				fmt.Println()
+				fmt.Println(dimStyle.Render("  [enter] balik ke pilih gate..."))
+				fmt.Scanln()
+				showMiniHeader()
+				continue
+			}
+			logOK("Script uploaded ke gate")
+
+			logInfo("Running update_reader.sh di gate, wait men...")
+			fmt.Println()
+
+			remoteCmd := "chmod +x ~/update_reader.sh && bash ~/update_reader.sh"
+
+			var sshCmd *exec.Cmd
+			if isZT {
+				sshCmd = exec.Command("sshpass", "-p", gatePass,
+					"ssh", "-t", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=30",
+					fmt.Sprintf("%s@%s", gateUser, selectedGate.IP),
+					remoteCmd,
+				)
+			} else {
+				sshCmd = exec.Command("sshpass", "-p", gatePass,
+					"ssh", "-t", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=30",
+					"-o", fmt.Sprintf("ProxyCommand=%s", proxyCmd),
+					fmt.Sprintf("%s@%s", gateUser, selectedGate.IP),
+					remoteCmd,
+				)
+			}
+
+			sshCmd.Stdout = os.Stdout
+			sshCmd.Stderr = os.Stderr
+			sshCmd.Stdin = os.Stdin
+
+			if err := sshCmd.Run(); err != nil {
+				logWarn("Script exited: " + err.Error())
+			} else {
+				logOK("Update reader selesai men!")
+			}
+
+			fmt.Println()
+			fmt.Println(dimStyle.Render("  [enter] balik ke pilih gate..."))
+			fmt.Scanln()
+			showMiniHeader()
+		}
 	}
 }
 
