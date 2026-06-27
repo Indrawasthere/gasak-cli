@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	AppVersion = "1.5.6"
+	AppVersion = "1.5.7"
 )
 
 var (
@@ -1882,6 +1882,19 @@ func checkPythonTk() bool {
 	return cmd.Run() == nil
 }
 
+func resolveGateUsername(userPC string, unicode string) string {
+	lower := strings.ToLower(userPC)
+	uni := strings.ToLower(unicode)
+
+	if strings.HasSuffix(lower, "-"+uni) {
+		return strings.TrimSuffix(lower, "-"+uni)
+	}
+	if strings.HasSuffix(lower, uni) {
+		return strings.TrimSuffix(lower, uni)
+	}
+	return lower
+}
+
 func runFetchLog() {
 	locs, err := loadLocations()
 	if err != nil {
@@ -2314,23 +2327,29 @@ func parseGateOutput(output string) ([]GateInfo, error) {
 
 func listGateLogFiles(tpUser *TeleportUser, loc *Location, gate GateInfo, remotePath string) ([]string, error) {
 	gatePass := fmt.Sprintf("pc%sclient", strings.ToLower(loc.Unicode))
-
-	lsCmd := fmt.Sprintf(
-		"sshpass -p '%s' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 %s@%s 'ls -lhtr %s 2>/dev/null | tail -30'",
-		gatePass, gate.UserPC, gate.IP, remotePath,
-	)
+	gateUser := resolveGateUsername(gate.UserPC, loc.Unicode)
 
 	var out []byte
 	var err error
 
 	if tpUser.IsL2 {
-		nodeName := nodeNameFromUnicode(loc.Unicode)
-		cmd := exec.Command("tsh", "ssh",
-			fmt.Sprintf("%s@%s", nodeName, nodeName),
+		lsCmd := fmt.Sprintf(
+			"sshpass -p '%s' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 %s@%s 'ls -lhtr %s 2>/dev/null | tail -30'",
+			gatePass, gateUser, gate.IP, remotePath,
+		)
+		cmd := exec.Command("sshpass", "-p", SshPass,
+			"ssh",
+			"-o", "StrictHostKeyChecking=no",
+			"-o", "ConnectTimeout=5",
+			fmt.Sprintf("parkee@10.70.0.110"),
 			lsCmd,
 		)
 		out, err = cmd.Output()
 	} else {
+		lsCmd := fmt.Sprintf(
+			"sshpass -p '%s' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 %s@%s 'ls -lhtr %s 2>/dev/null | tail -30'",
+			gatePass, gateUser, gate.IP, remotePath,
+		)
 		cmd := exec.Command("sshpass", "-p", SshPass,
 			"ssh",
 			"-o", "StrictHostKeyChecking=no",
@@ -2561,6 +2580,7 @@ func fetchAgentGateLog(tpUser *TeleportUser, loc *Location, remotePath string, l
 
 func scpGateFileViaServerPos(tpUser *TeleportUser, loc *Location, gate GateInfo, remoteFilePath string, filename string) {
 	gatePass := fmt.Sprintf("pc%sclient", strings.ToLower(loc.Unicode))
+	gateUser := resolveGateUsername(gate.UserPC, loc.Unicode)
 	tmpPath := fmt.Sprintf("/tmp/%s", filename)
 
 	destDir := filepath.Join(os.Getenv("HOME"), "Downloads", "logs", strings.ToUpper(loc.Unicode), gate.UserPC)
@@ -2581,8 +2601,8 @@ func scpGateFileViaServerPos(tpUser *TeleportUser, loc *Location, gate GateInfo,
 
 		compressAndHop := fmt.Sprintf(
 			"sshpass -p '%s' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 %s@%s 'gzip -c %s > %s' && sshpass -p '%s' scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 %s@%s:%s %s",
-			gatePass, gate.UserPC, gate.IP, remoteFilePath, gzRemote,
-			gatePass, gate.UserPC, gate.IP, gzRemote, gzTmp,
+			gatePass, gateUser, gate.IP, remoteFilePath, gzRemote,
+			gatePass, gateUser, gate.IP, gzRemote, gzTmp,
 		)
 
 		var compressHopCmd *exec.Cmd
@@ -2614,7 +2634,7 @@ func scpGateFileViaServerPos(tpUser *TeleportUser, loc *Location, gate GateInfo,
 
 			cleanGzGate := fmt.Sprintf(
 				"sshpass -p '%s' ssh -o StrictHostKeyChecking=no %s@%s 'rm -f %s'",
-				gatePass, gate.UserPC, gate.IP, gzRemote,
+				gatePass, gateUser, gate.IP, gzRemote,
 			)
 			if tpUser.IsL2 {
 				nodeName := nodeNameFromUnicode(loc.Unicode)
@@ -2631,7 +2651,7 @@ func scpGateFileViaServerPos(tpUser *TeleportUser, loc *Location, gate GateInfo,
 	{
 		hop1Cmd := fmt.Sprintf(
 			"sshpass -p '%s' scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 %s@%s:%s %s",
-			gatePass, gate.UserPC, gate.IP, remoteFilePath, tmpPath,
+			gatePass, gateUser, gate.IP, remoteFilePath, tmpPath,
 		)
 
 		var hop1Err error
