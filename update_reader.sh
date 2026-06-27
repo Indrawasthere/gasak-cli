@@ -1,49 +1,34 @@
 #!/bin/bash
 
-#=====================================================================#
-#=======================variable update_reader()======================#
-#=====================================================================#
-#init reader
-USERNAME_READER="root"
-READER_COHERENT_IP="192.168.1.199"
+USERNAME_READER="${READER_USERNAME:-root}"
+READER_COHERENT_IP="${READER_COHERENT_IP}"
+PASSWORD_READER="${READER_PASSWORD}"
 SSH_READER="$USERNAME_READER@$READER_COHERENT_IP"
-PASSWORD_READER="TRAN5act10n+953"
 
 NEW_IP="192.168.1.200/24"
 IP_GATEWAY="192.168.1.1"
 
-#=====================================================================#
-#=============================download file===========================#
-#=====================================================================#
-# FW_ZIP ditentukan saat runtime berdasarkan input versi user
 SCRIPT_NAME='jellies_scripts'
 SCRIPT_ZIP="${SCRIPT_NAME}.zip"
-#=====================================================================#
-#===========================server source=============================#
-#=====================================================================#
+
 PARKEE_FOLDER='/opt/app/agent/parkee-agent'
 PARKEE_SSH_PROP="${PARKEE_FOLDER}/server.properties"
-PARKEE_SSH_USER='support'
-PARKEE_SSH_PASS='support545115'
+PARKEE_SSH_USER="${PARKEE_SSH_USER}"
+PARKEE_SSH_PASS="${PARKEE_SSH_PASS}"
 PARKEE_SSH_IP=$(grep -oP '^dbHost=\K.*' "$PARKEE_SSH_PROP")
 PARKEE_SSH_SOURCE='/home/support'
 PARKEE_SSH_SERVER="${PARKEE_SSH_USER}@${PARKEE_SSH_IP}"
 PARKEE_SSH_OPT="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-#=====================================================================#
-#===========================local file / dir==========================#
-#=====================================================================#
-DOWNLOAD_DIR="$HOME/Downloads"
 
+DOWNLOAD_DIR="$HOME/Downloads"
 SCRIPT_DIR="$DOWNLOAD_DIR/$SCRIPT_NAME/scripts"
 SSH_KEY_PATH="$HOME/.ssh/id_rsa"
-#=====================================================================#
-#==========================reader file/folder=========================#
-#=====================================================================#
+
 DIR_BIN='/apps/parque/bin'
-FILE_FIRMWARE='parque' 
+FILE_FIRMWARE='parque'
 PATH_FILE_FIRMWARE=$DIR_BIN/$FILE_FIRMWARE
 
-FILE_UI='uimedia' 
+FILE_UI='uimedia'
 PATH_FILE_UI=$DIR_BIN/$FILE_UI
 
 DIR_cronjob_reader='/apps/etc/cronjobs'
@@ -58,22 +43,14 @@ DIR_debug_config='/apps/ocean/etc'
 FILE_debug_config='debug.config'
 PATH_FILE_debug_config=$DIR_debug_config/$FILE_debug_config
 
-#=====================================================================#
-#===========================PATH PSAM CONFIG==========================#
-#=====================================================================#
 DIR_PSAM_config="/apps/parque/data"
 FILE_PSAM_config="config.ini"
 PATH_FILE_PSAM_config=$DIR_PSAM_config/$FILE_PSAM_config
-#=====================================================================#
 
-#=====================================================================#
-#=========================variable serial_dev=========================#
-#=====================================================================#
 DIR_PARKEE_AGENT="/opt/app/agent/parkee-agent"
 FILE_DEV_PROP="device.properties"
 PATH_DEV_PROP=$DIR_PARKEE_AGENT/$FILE_DEV_PROP
 service_name="parkee-agent"
-#=====================================================================#
 
 
 # Fungsi menampilkan semua NIC dan IP
@@ -93,7 +70,7 @@ cek_ip() {
 
 	# Cek apakah NIC memiliki profil koneksi yang aktif
 	connection_name=$(nmcli -t -f DEVICE,CONNECTION device status | grep "^$nic:" | cut -d':' -f2)
-	 
+
 	if [[ -z "$connection_name" ||"$connection_name" == "--" ]]; then
 		ip_method="-"
 	else
@@ -112,7 +89,7 @@ cek_ip() {
 	gateway=$(nmcli -t -f IP4.GATEWAY device show "$nic" | cut -d':' -f2)
 	[[ -z "$gateway" ]] && gateway="-"
 	printf "🔸 %-12s : %s\n" "Gateway" "$gateway"
-	 
+
 	dns=$(nmcli -t -f IP4.DNS device show "$nic" | cut -d':' -f2 | paste -sd ", ")
 	[[ -z "$dns" ]] && dns="-"
 	printf "🔸 %-12s : %s\n" "dns" "$dns"
@@ -198,10 +175,10 @@ bypass_reader() {
 clear
 if ! command sshpass &> /dev/null; then
 	sudo sed -i 's|http://id.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list
-	sudo sed -i 's|^\([^#]\)|#\1|' /etc/apt/sources.list.d/anydesk-stable.list 
-	sudo sed -i 's|^\([^#]\)|#\1|' /etc/apt/sources.list.d/bellsoft.list 
+	sudo sed -i 's|^\([^#]\)|#\1|' /etc/apt/sources.list.d/anydesk-stable.list
+	sudo sed -i 's|^\([^#]\)|#\1|' /etc/apt/sources.list.d/bellsoft.list
 	sudo sed -i 's|^\([^#]\)|#\1|' /etc/apt/sources.list.d/archive_uri-https_dl_winehq_org_wine-builds_ubuntu_-jammy.list
-	sudo apt update 
+	sudo apt update
 	sudo apt install sshpass -y
 fi
 
@@ -209,7 +186,7 @@ sudo chown -R $USER:$GROUP $HOME/.ssh
 
 #cd $HOME/.ssh
 #if [ ! -f "$SSH_KEY_PATH" ]; then
-#rm -f "$SSH_KEY_PATH" 
+#rm -f "$SSH_KEY_PATH"
 #rm -f "$SSH_KEY_PATH.pub"
 #fi
 
@@ -217,7 +194,7 @@ ssh-keygen -t rsa -b 4096 -f "$SSH_KEY_PATH" -N ""
 sshpass -p "${PASSWORD_READER}" ssh-copy-id -o StrictHostKeyChecking=no "${SSH_READER}"
 
 cd $HOME/
-	
+
 }
 
 
@@ -278,7 +255,7 @@ serial_dev() {
 		echo -e "❌CONFIGURATION FILE $PATH_DEV_PROP NOT FOUND!!!!!!"
 		return 1
 	fi
-	
+
 	echo -e "\n===================================================\n"
 	echo -e "🔍SHOWING THE CURRENT CONFIGURATION:"
 	cat "$PATH_DEV_PROP" | grep -E "^wuzz.reader.standby.mode="
@@ -304,7 +281,7 @@ serial_dev() {
 	echo -e "🔎DETECT AVAILABLE SERIAL PORTS"
 
 	serial_ports=$(sudo dmesg | grep 'tty' | grep -o 'tty[A-Za-z0-9]*' | sort -u)
-	
+
 	if [[ -z "$serial_ports" ]]; then
 		echo -e "⚠️NO SERIAL PORTS FOUND. MAKE SURE PCI-E IS PROPERLY INSTALLED⚠️"
 		read -p "DO YOU WANT TO SHUTDOWN NOW? (y/n): " shutdown_confirm
@@ -326,7 +303,7 @@ serial_dev() {
 
 		echo -e "\n===================================================\n"
 	fi
-   
+
 	# ===============================
 	# OLD INPUT METHOD (DIKOMEN SAJA)
 	# ===============================
@@ -419,7 +396,7 @@ serial_dev() {
 	sudo sed -i -E "s|^(wuzz.reader.standby.mode=).*|\1STANDBY_MODE_READER|" "$PATH_DEV_PROP"
 	sudo sed -i -E "s|^barcode.debounce=.*|barcode.debounce=600|" "$PATH_DEV_PROP"
 	sudo sed -i -E "s|^suggestion.debounce=.*|suggestion.debounce=600|" "$PATH_DEV_PROP"
-	
+
 	#echo -e "==========DEPLOY LIVE LOG READER PARKEE==========="
 	#if ! grep 'alias parkee-reader-log=' "$HOME/.zshrc"; then
 	#	echo 'alias parkee-reader-log="ssh root@192.168.1.199 \"tail -f -n 10000 /media/mmc/\\\$(ls -t /media/mmc/ | head -n 1)\""' | tee -a "$HOME/.zshrc"
@@ -456,8 +433,8 @@ serial_dev() {
 	if [[ $restart_confirm == "y" ]]; then
 		sudo systemctl restart "$service_name"
 		sleep 2
-		systemctl is-active --quiet "$service_name" 
-		echo -e "✅SERVICE SUCCESSFULLY RESTARTED" || echo -e "❌FAILED TO RESTART SERVICE" 
+		systemctl is-active --quiet "$service_name"
+		echo -e "✅SERVICE SUCCESSFULLY RESTARTED" || echo -e "❌FAILED TO RESTART SERVICE"
 		clear
 	else
 		echo -e "🔙BACK TO MAIN MENU"
@@ -509,8 +486,8 @@ update_reader() {
 	bypass_script(){
 		if ! command -v sshpass &> /dev/null; then
 			sudo sed -i 's|http://id.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list
-			sudo sed -i 's|^\([^#]\)|#\1|' /etc/apt/sources.list.d/anydesk-stable.list 
-			sudo sed -i 's|^\([^#]\)|#\1|' /etc/apt/sources.list.d/bellsoft.list 
+			sudo sed -i 's|^\([^#]\)|#\1|' /etc/apt/sources.list.d/anydesk-stable.list
+			sudo sed -i 's|^\([^#]\)|#\1|' /etc/apt/sources.list.d/bellsoft.list
 			sudo sed -i 's|^\([^#]\)|#\1|' /etc/apt/sources.list.d/archive_uri-https_dl_winehq_org_wine-builds_ubuntu_-jammy.list
 		fi
 		sudo chown -R $USER:$GROUP $HOME/.ssh
@@ -535,7 +512,7 @@ update_reader() {
 	# Pastikan FW_ZIP & SCRIPT_ZIP ada di server — kalau tidak, hit API
 	# ===================================================================
 	ensure_files_on_server(){
-		local API_BASE="http://10.70.0.110:9001"
+		local API_BASE="${GASAK_DIST_URL}"
 
 		echo -e "====================================================="
 		echo -e "=======🔍CHECKING FILES AVAILABILITY ON SERVER======="
@@ -856,17 +833,17 @@ update_reader() {
 	# Crontab client — wajib untuk v17 dan v19 (pkill uimedia)
 	# ===================================================================
 	crontab_client_uimedia(){
-		echo -e "====================================================="
-		echo -e "=====🚀CRONTAB CLIENT: PKILL UIMEDIA (v${FW_VERSION})🚀====="
-		echo -e "=====================📌BEFORE📌======================"
-		crontab -l 2>/dev/null | grep "pkill /apps/parque/bin/uimedia" || echo "(belum ada)"
-		echo -e "====================================================="
-		(crontab -l 2>/dev/null | grep -v "pkill /apps/parque/bin/uimedia"; echo "*/10 * * * * ssh root@192.168.1.199 'pkill /apps/parque/bin/uimedia'") | crontab -
-		echo -e "=====================📌AFTER📌======================="
-		crontab -l | grep --color=auto "pkill"
-		echo -e "====================================================="
-		echo -e "✅CRONTAB CLIENT UIMEDIA PKILL DONE✅"
-		echo -e "=====================================================\n"
+        echo -e "====================================================="
+        echo -e "=====🚀CRONTAB CLIENT: PKILL UIMEDIA (v${FW_VERSION})🚀====="
+        echo -e "=====================📌BEFORE📌======================"
+        crontab -l 2>/dev/null | grep "pkill /apps/parque/bin/uimedia" || echo "(belum ada)"
+        echo -e "====================================================="
+        (crontab -l 2>/dev/null | grep -v "pkill /apps/parque/bin/uimedia"; echo "*/10 * * * * ssh ${SSH_READER} 'pkill /apps/parque/bin/uimedia'") | crontab -
+        echo -e "=====================📌AFTER📌======================="
+        crontab -l | grep --color=auto "pkill"
+        echo -e "====================================================="
+        echo -e "✅CRONTAB CLIENT UIMEDIA PKILL DONE✅"
+        echo -e "=====================================================\n"
 	}
 
 	# ===================================================================
@@ -1068,10 +1045,10 @@ else
 echo -e "===========⚠️ LOG FILE READER NOT FOUND⚠️============"
 echo -e "=====================================================\n"
 	fi
-	
+
 	echo -e "====================================================="
 	echo -e "===========🔍GET PARKEE READER VERSION🔍============"
-	if ssh "$SSH_READER" 'ls /media/mmc/reader-log-*.log 1>/dev/null 2>&1'; then	
+	if ssh "$SSH_READER" 'ls /media/mmc/reader-log-*.log 1>/dev/null 2>&1'; then
 	if ! ssh "$SSH_READER" 'head -n 90 "$(ls -t /media/mmc | head -n 1 | sed "s|^|/media/mmc/|")" | tail -n 6'; then
 		echo -e "========❌FAILED GET PARKEE READER VERSION❌========"
 		echo -e "=====================================================\n"
@@ -1093,11 +1070,11 @@ echo -e "=====================================================\n"
 		echo -e "=========✅GET PARKEE AGENT VERSION DONE✅=========="
 		echo -e "=====================================================\n"
 	fi
-	
+
 	ssh $SSH_READER "cat $PATH_FILE_PSAM_config"
 }
 
-psam_dki(){	
+psam_dki(){
 	clear
 	# Fungsi untuk menginstal PSAM DKI (menambahkan atau memperbarui konfigurasi DKI)
 	install_psam_dki() {
@@ -1117,21 +1094,21 @@ psam_dki(){
 		if ssh $SSH_READER "grep -q '^\[DKI\]' $PATH_FILE_PSAM_config"; then
 		echo -e "📌PSAM [DKI] IS ACTIVE, ONLY UPDATE MID, TID, BATCH, AND SLOT📌"
 		ssh $SSH_READER <<EOF
-		sed -i '/^\[DKI\]/,/^\[/{ 
-		s|^MID=.*|MID=$NEW_MID_DKI|; 
-		s|^TID=.*|TID=$NEW_TID_DKI|; 
-		s|^BATCH=.*|BATCH=$NEW_BATCH_DKI|; 
-		s|^slot=.*|slot=$NEW_SLOT_DKI| 
+		sed -i '/^\[DKI\]/,/^\[/{
+		s|^MID=.*|MID=$NEW_MID_DKI|;
+		s|^TID=.*|TID=$NEW_TID_DKI|;
+		s|^BATCH=.*|BATCH=$NEW_BATCH_DKI|;
+		s|^slot=.*|slot=$NEW_SLOT_DKI|
 		}' $PATH_FILE_PSAM_config
 EOF
 	else
 		echo -e "📌PSAM [DKI] IS NOT ACTIVE YET, ACTIVATE IT FIRST📌"
 		ssh $SSH_READER <<EOF
-		sed -i '/^\#\[DKI\]/,/^\[/{ 
-		s|^\#MID=.*|MID=$NEW_MID_DKI|; 
-		s|^\#TID=.*|TID=$NEW_TID_DKI|; 
-		s|^\#BATCH=.*|BATCH=$NEW_BATCH_DKI|; 
-		s|^\#slot=.*|slot=$NEW_SLOT_DKI| 
+		sed -i '/^\#\[DKI\]/,/^\[/{
+		s|^\#MID=.*|MID=$NEW_MID_DKI|;
+		s|^\#TID=.*|TID=$NEW_TID_DKI|;
+		s|^\#BATCH=.*|BATCH=$NEW_BATCH_DKI|;
+		s|^\#slot=.*|slot=$NEW_SLOT_DKI|
 		}' $PATH_FILE_PSAM_config
 		sed -i 's/^\#\[DKI\]/\[DKI\]/' $PATH_FILE_PSAM_config
 EOF
@@ -1231,7 +1208,7 @@ EOF
 		echo -e "\n\n=============📌CONFIG PSAM [DKI] NOW📌=============="
 		ssh -t $SSH_READER "cat $PATH_FILE_PSAM_config"
 		echo -e "=====================================================\n\n"
-		
+
 		echo -e "\n===============🔄INIT PSAM PROCESS🔄================\n"
 		if ssh "$SSH_READER" 'ls /media/mmc/reader-log-*.log 1>/dev/null 2>&1'; then
 		ssh -t $SSH_READER "grep -A 2 'SAM Select' \$(ls -t /media/mmc/reader-log-*.log | head -n 1)"
@@ -1241,12 +1218,12 @@ EOF
 		echo -e "=====================================================\n"
 		fi
 	}
-	
+
 	reboot_reader_dki(){
 		clear
 		echo -e "====================================================="
 		echo "==============🔄REBOOT PARKEE READER🔄=============="
-		if ! ssh "$SSH_READER" "reboot now" ; then 
+		if ! ssh "$SSH_READER" "reboot now" ; then
 			echo "==========❌FAILED REBOOT PARKEE READER❌==========="
 			echo -e "=====================================================\n"
 			return 1
@@ -1266,7 +1243,7 @@ EOF
 			echo -e "======✅RESTARTING PARKEE AGENT SERVICE DONE✅======"
 			echo -e "=====================================================\n"
 		fi
-		
+
 		echo -e "====================================================="
 		echo -e "===============🔄INIT PSAM PROCESS🔄================"
 	if ! ssh "$SSH_READER" 'ls /media/mmc/reader-log-*.log 1>/dev/null 2>&1'; then
@@ -1283,8 +1260,8 @@ EOF
 		fi
 
 	}
-	
-		
+
+
 	# Menu pilihan
 	while true; do
 echo -e "Gate : $(whoami)\n"
@@ -1554,7 +1531,7 @@ reboot_reader() {
 	echo -e "====================================================="
 	echo -e "==============🔄REBOOT PARKEE READER🔄==============="
 	echo -e "=====================================================\n"
-	if ! ssh "$SSH_READER" "reboot now" ; then 
+	if ! ssh "$SSH_READER" "reboot now" ; then
 		echo -e "====================================================="
 		echo "==========❌FAILED REBOOT PARKEE READER❌============"
 		echo -e "=====================================================\n"
@@ -1569,7 +1546,7 @@ reboot_reader() {
 		echo -e "=========✅PARKEE READER HAS BEEN RUNNING✅=========="
 		echo -e "=====================================================\n"
 	fi
-	
+
 	echo -e "====================================================="
 	echo -e "===============🔄INIT PSAM PROCESS🔄================="
 	echo -e "=====================================================\n"
@@ -1643,4 +1620,3 @@ fi
 	*) echo -e "❌ Pilihan tidak valid!";;
 	esac
 done
-

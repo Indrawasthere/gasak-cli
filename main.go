@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	AppVersion = "1.5.5"
+	AppVersion = "1.5.6"
 )
 
 var (
@@ -838,10 +838,21 @@ func runParkeeLauncher() {
 	cmd.Stdin = os.Stdin
 
 	cmd.Env = append(os.Environ(),
-		"PARKEE_SSH_USER="+os.Getenv("PARKEE_SSH_USER"),
-		"PARKEE_SSH_PASS="+os.Getenv("PARKEE_SSH_PASS"),
-		"GSHEET_DEPLOY_ID="+SpreadsheetID,
-		"GSHEET_DEPLOY_GID="+SheetGID,
+		"READER_USERNAME="+ReaderUsername,
+		"READER_COHERENT_IP="+ReaderCoherentIp,
+		"READER_PASSWORD="+ReaderPassword,
+		"PARKEE_SSH_USER=support",
+		"PARKEE_SSH_PASS="+SshPass,
+		"GASAK_DIST_URL="+DistServerURL,
+		"AGENT_SERVER_HOST="+AgentServerHost,
+		"AGENT_SSH_PORT_ALT="+AgentSshPortAlt,
+		"AGENT_DB_NAME="+AgentDbName,
+		"AGENT_DB_SUFFIX="+AgentDbSuffix,
+		"FTP_HOST="+FtpHost,
+		"FTP_USERNAME="+FtpUsername,
+		"QIQO_PASSWORD="+QiqoPassword,
+		"QIQO_SALT="+QiqoSalt,
+		"CREDENTIAL_INFO="+CredentialInfo,
 	)
 
 	if err := cmd.Run(); err != nil {
@@ -861,6 +872,31 @@ func runLocationLookup() {
 	for _, l := range locs {
 		label := fmt.Sprintf("%-8s | %-45s | %s", l.Unicode, truncate(l.Nama, 45), l.IP)
 		options = append(options, huh.NewOption(label, l.Unicode))
+	}
+
+	plocRequest := func(keyword string) ([]byte, error) {
+		client := &http.Client{Timeout: 30 * time.Second}
+		req, err := http.NewRequest("GET",
+			fmt.Sprintf(VaultServerURL+"/api/ploc?keyword=%s", strings.ToLower(keyword)),
+			nil,
+		)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("X-Gasak-Token", GasakDistToken)
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("vault error (%d): %s", resp.StatusCode, string(body))
+		}
+		return body, nil
 	}
 
 	for {
@@ -894,9 +930,6 @@ func runLocationLookup() {
 			continue
 		}
 
-		logOK(fmt.Sprintf("Target: %s [%s]", selectedLoc.Nama, strings.ToUpper(selectedLoc.Unicode)))
-		fmt.Println()
-
 		if VaultServerURL == "" {
 			logErr("Vault server URL belum di-set men!")
 			logInfo("Pastikan GASAK_VAULT_URL ada di .env atau vault")
@@ -917,47 +950,14 @@ func runLocationLookup() {
 			continue
 		}
 
+		logOK(fmt.Sprintf("Target: %s [%s]", selectedLoc.Nama, strings.ToUpper(selectedLoc.Unicode)))
+		fmt.Println()
 		logInfo("Fetching lokasi via API Vault, wait up men...")
 		fmt.Println()
 
-		client := &http.Client{Timeout: 30 * time.Second}
-		req, err := http.NewRequest("GET",
-			fmt.Sprintf(VaultServerURL+"/api/ploc?keyword=%s", strings.ToLower(selectedLoc.Unicode)),
-			nil,
-		)
+		body, err := plocRequest(selectedLoc.Unicode)
 		if err != nil {
-			logErr("Gagal bikin request men: " + err.Error())
-			fmt.Println()
-			fmt.Println(dimStyle.Render("  [enter] balik ke pilih lokasi..."))
-			fmt.Scanln()
-			showMiniHeader()
-			continue
-		}
-		req.Header.Set("X-Gasak-Token", GasakDistToken)
-
-		resp, err := client.Do(req)
-		if err != nil {
-			logErr("Vault server ga bisa dihubungi men: " + err.Error())
-			fmt.Println()
-			fmt.Println(dimStyle.Render("  [enter] balik ke pilih lokasi..."))
-			fmt.Scanln()
-			showMiniHeader()
-			continue
-		}
-		defer resp.Body.Close()
-
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			logErr("Gagal baca response men: " + err.Error())
-			fmt.Println()
-			fmt.Println(dimStyle.Render("  [enter] balik ke pilih lokasi..."))
-			fmt.Scanln()
-			showMiniHeader()
-			continue
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			logErr(fmt.Sprintf("Vault server error men (%d): %s", resp.StatusCode, string(body)))
+			logErr("Request gagal men: " + err.Error())
 			fmt.Println()
 			fmt.Println(dimStyle.Render("  [enter] balik ke pilih lokasi..."))
 			fmt.Scanln()
@@ -975,7 +975,8 @@ func runLocationLookup() {
 					huh.NewSelect[string]().
 						Title(fmt.Sprintf("Aksi untuk %s:", selectedLoc.Nama)).
 						Options(
-							huh.NewOption("SSH ke Lokasi", "ssh_to"),
+							huh.NewOption("SSH ke Lokasi (as support)", "ssh_to"),
+							huh.NewOption("Bulk Lookup", "bulk"),
 							huh.NewOption("← Balik ke Pilih Lokasi", "back"),
 						).
 						Value(&subAction),
@@ -999,7 +1000,7 @@ func runLocationLookup() {
 					fmt.Println()
 					continue
 				}
-				logInfo(fmt.Sprintf("SSH @%s ...", selectedLoc.IP))
+				logInfo(fmt.Sprintf("SSH as support@%s ...", selectedLoc.IP))
 				fmt.Println()
 				runInteractive(
 					"sshpass",
@@ -1010,6 +1011,43 @@ func runLocationLookup() {
 					fmt.Sprintf("support@%s", selectedLoc.IP),
 				)
 				fmt.Println()
+				fmt.Println(dimStyle.Render("  [enter] balik ke menu aksi..."))
+				fmt.Scanln()
+				showMiniHeader()
+				fmt.Println(string(body))
+				fmt.Println()
+
+			case "bulk":
+				var bulkInput string
+				bulkForm := huh.NewForm(
+					huh.NewGroup(
+						huh.NewInput().
+							Title("Bulk Lookup:").
+							Description("Masukkan unicode lokasi dipisah spasi. Contoh: 00z 0pv 01a").
+							Placeholder("00z 0pv 01a").
+							Value(&bulkInput),
+					),
+				).WithTheme(crushTheme())
+
+				if err := bulkForm.Run(); err != nil || strings.TrimSpace(bulkInput) == "" {
+					continue
+				}
+
+				keywords := strings.Fields(strings.TrimSpace(bulkInput))
+				logInfo(fmt.Sprintf("Bulk lookup %d lokasi, wait up men...", len(keywords)))
+				fmt.Println()
+
+				for _, kw := range keywords {
+					logInfo(fmt.Sprintf("Fetching [%s]...", strings.ToUpper(kw)))
+					bulkBody, bulkErr := plocRequest(kw)
+					if bulkErr != nil {
+						logErr(fmt.Sprintf("[%s] %s", strings.ToUpper(kw), bulkErr.Error()))
+						continue
+					}
+					fmt.Println(string(bulkBody))
+					fmt.Println()
+				}
+
 				fmt.Println(dimStyle.Render("  [enter] balik ke menu aksi..."))
 				fmt.Scanln()
 				showMiniHeader()
@@ -2331,6 +2369,54 @@ func listGateLogFiles(tpUser *TeleportUser, loc *Location, gate GateInfo, remote
 	return files, nil
 }
 
+func grepKeywordInGateLogs(tpUser *TeleportUser, loc *Location, gate GateInfo, remotePath string, keyword string) ([]string, error) {
+	gatePass := fmt.Sprintf("pc%sclient", strings.ToLower(loc.Unicode))
+
+	grepCmd := fmt.Sprintf(
+		"sshpass -p '%s' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 %s@%s 'grep -rl \"%s\" %s 2>/dev/null | xargs -I{} basename {}'",
+		gatePass, gate.UserPC, gate.IP, keyword, remotePath,
+	)
+
+	var out []byte
+	var err error
+
+	if tpUser.IsL2 {
+		nodeName := nodeNameFromUnicode(loc.Unicode)
+		cmd := exec.Command("tsh", "ssh",
+			fmt.Sprintf("%s@%s", nodeName, nodeName),
+			grepCmd,
+		)
+		out, err = cmd.Output()
+	} else {
+		cmd := exec.Command("sshpass", "-p", SshPass,
+			"ssh",
+			"-o", "StrictHostKeyChecking=no",
+			"-o", "ConnectTimeout=5",
+			fmt.Sprintf("support@%s", loc.IP),
+			grepCmd,
+		)
+		out, err = cmd.Output()
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("grep gagal: %w", err)
+	}
+
+	raw := strings.TrimSpace(string(out))
+	if raw == "" {
+		return nil, nil
+	}
+
+	var matched []string
+	for _, l := range strings.Split(raw, "\n") {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			matched = append(matched, l)
+		}
+	}
+	return matched, nil
+}
+
 func fetchAgentGateLog(tpUser *TeleportUser, loc *Location, remotePath string, logLabel string) {
 	logInfo(fmt.Sprintf("List Gate di %s [%s]...", loc.Nama, loc.Unicode))
 	fmt.Println()
@@ -2392,7 +2478,52 @@ func fetchAgentGateLog(tpUser *TeleportUser, loc *Location, remotePath string, l
 			continue
 		}
 
-		fileOpts := make([]huh.Option[string], 0, len(files)+1)
+		// ── keyword grep filter ──
+		var keyword string
+		keywordForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Filter log by keyword (opsional):").
+					Description("Nomor polisi, parking slip, wuzz ID, dll. Kosongkan untuk tampilkan semua.").
+					Placeholder("contoh: B1234XYZ atau WUZZ-001").
+					Value(&keyword),
+			),
+		).WithTheme(crushTheme())
+		_ = keywordForm.Run()
+
+		keyword = strings.TrimSpace(keyword)
+
+		filteredFiles := files
+		if keyword != "" {
+			logInfo(fmt.Sprintf("Grep '%s' di %d file, bentar men...", keyword, len(files)))
+			matchedNames, grepErr := grepKeywordInGateLogs(tpUser, loc, selectedGate, remotePath, keyword)
+			if grepErr != nil {
+				logWarn("Grep gagal, nampilin semua file aja: " + grepErr.Error())
+			} else if len(matchedNames) == 0 {
+				logWarn(fmt.Sprintf("Keyword '%s' ga ketemu di log manapun, nampilin semua.", keyword))
+			} else {
+				matchedSet := make(map[string]bool)
+				for _, m := range matchedNames {
+					matchedSet[m] = true
+				}
+				var tmp []string
+				for _, f := range files {
+					fname := strings.Fields(f)[0]
+					if matchedSet[fname] {
+						tmp = append(tmp, f)
+					}
+				}
+				if len(tmp) > 0 {
+					filteredFiles = tmp
+					logOK(fmt.Sprintf("%d file mengandung keyword '%s'", len(filteredFiles), keyword))
+				} else {
+					logWarn("Ga ada match setelah filter, nampilin semua.")
+				}
+			}
+			fmt.Println()
+		}
+
+		fileOpts := make([]huh.Option[string], 0, len(filteredFiles)+1)
 		fileOpts = append(fileOpts, huh.NewOption("← Balik ke Pilih Gate", "back"))
 		for _, f := range files {
 			fileOpts = append(fileOpts, huh.NewOption(f, f))

@@ -5,6 +5,7 @@ Parkee Agent Deployment Tool
 UI: rich + questionary + iterfzf  |  Logic: merged from py_deploy by Mas Michael Martoyo + gum.sh
 """
 
+import atexit
 import csv
 import os
 import signal
@@ -720,6 +721,18 @@ def update_properties(ip: str, unicode_code: str) -> bool:
     return True
 
 
+def watch_agent_and_cleanup(pid: int):
+    try:
+        while True:
+            time.sleep(3)
+            check = subprocess.run(["kill", "-0", str(pid)], capture_output=True)
+            if check.returncode != 0:
+                cleanup_temp()
+                break
+    except Exception:
+        pass
+
+
 # ─────────────────────────────────────────────────────────────
 # RUN AGENT — full JVM flags + background nohup + logging
 # ─────────────────────────────────────────────────────────────
@@ -772,8 +785,10 @@ def run_agent() -> tuple[bool, Path]:
     # Verify process jalan
     check = subprocess.run(["pgrep", "-f", JAR_NAME], capture_output=True, text=True)
     if check.returncode == 0:
-        pid = check.stdout.strip().split("\n")[0]
+        pid = int(check.stdout.strip().split("\n")[0])
         ok(f"Agent process gasak di (PID: {pid})")
+        t = threading.Thread(target=watch_agent_and_cleanup, args=(pid,), daemon=True)
+        t.start()
         return True, log_file
     else:
         err("Agent process not found after launch")
@@ -844,6 +859,18 @@ def show_location_panel(loc: dict):
     )
 
 
+TEMP_FILE = f"{APP_DIR}/temporary.temp"
+
+
+def cleanup_temp():
+    try:
+        if os.path.exists(TEMP_FILE):
+            os.remove(TEMP_FILE)
+            ok("temporary.temp cleared")
+    except Exception:
+        pass
+
+
 # ─────────────────────────────────────────────────────────────
 # MAIN MENU
 # ─────────────────────────────────────────────────────────────
@@ -870,9 +897,11 @@ def main_menu() -> str | None:
 def main():
     def _sigint(sig, frame):
         console.print(f"\n\n[{PINK}]  Disconnecting...[/]\n")
+        cleanup_temp()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, _sigint)
+    atexit.register(cleanup_temp)
 
     check_dependencies()
     show_header()
@@ -885,6 +914,7 @@ def main():
 
         if option is None or option == "Exit":
             console.print(f"\n[{PINK}]  Disconnecting...[/]\n")
+            cleanup_temp()
             break
 
         elif option == "Tembak Agent":
