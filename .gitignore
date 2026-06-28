@@ -62,3 +62,5 @@ windows-version/
 .mimocode/
 agent/
 firmware/
+installer/
+downloaded_files/

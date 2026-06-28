@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	AppVersion = "1.5.7"
+	AppVersion = "1.5.8"
 )
 
 var (
@@ -205,16 +205,52 @@ func logWarn(msg string) { fmt.Println(warnStyle.Render("  ⚠  " + msg)) }
 
 func getGreeting() string {
 	h := time.Now().Hour()
+
+	var pool []string
 	switch {
+	case h < 6:
+		pool = []string{
+			"Jam segini masih on sih ente janggal men",
+			"Kasur bilek: gue kata mah apa",
+			"Gue yakin, entah ente standby malem atau... hehehe",
+			"Tutup laptop, ngerokok sebatang, turu dah yak",
+		}
 	case h < 11:
-		return "Pagi men, ngopi dulu jangan lupa yak"
+		pool = []string{
+			"Pagi men, semoga hari ini adem ayem yak",
+			"Pagi men, ngopi sama sebat dulu lah men biar ga selek",
+			"Pagi men, bismillah lokasi pada nurut hari ini",
+			"Pagi men, eskalasi belom ada kan?",
+		}
 	case h < 15:
-		return "Siang men, jangan lupa check task yak"
+		pool = []string{
+			"Siang men, madang men",
+			"Siang men, jangan lupa baca outline yak",
+		}
 	case h < 18:
-		return "Sore men, rokok kopi dulu ga sih?..."
-	default:
-		return "Sudah malam? atau sudah tau?"
+		pool = []string{
+			"Sore men, jangan lupa bikin linear men",
+			"Sore men, ngopi dulu ga sih",
+			"Sore men, biar dilanjut anak sore ga sih awkawkawk",
+			"Sore men, gasak beresin yang urgent sisanya skip dulu",
+		}
+	case h < 21:
+		pool = []string{
+			"Malem men, ente lembur atau emang betah?",
+			"Malem men, madang dulu men ketoprak kek kebab kek baru lanjut lagi",
+			"Malem men, semoga ini tiket terakhir buat hari ini",
+			"Malem men, inget kasur yee men awkawkawk",
+		}
+	case h >= 21:
+		pool = []string{
+			"Anjay shift sore nih kek nya awkawkawk",
+			"Semangat men, lemburan dikit lagi cair",
+			"Anda di eskalasi siapa men awkawkawk",
+			"Mata cekung, isi dompet tidak mendukung~",
+		}
 	}
+
+	return pool[time.Now().UnixNano()%int64(len(pool))]
 }
 
 func getUserName() string {
