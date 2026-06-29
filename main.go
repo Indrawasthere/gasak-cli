@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	AppVersion = "1.5.8"
+	AppVersion = "1.5.9"
 )
 
 var (
@@ -2096,17 +2096,13 @@ func fetchSingleFile(tpUser *TeleportUser, loc *Location, remotePath string, log
 }
 
 func listRemoteDir(tpUser *TeleportUser, loc *Location, remoteDir string) ([]string, error) {
-	lsCmd := fmt.Sprintf("cd %s && ls -lhtr 2>/dev/null | tail -50", remoteDir)
-
+	lsCmd := fmt.Sprintf("ls -lht %s 2>&1 | grep -v ^total | head -200", remoteDir)
 	var out []byte
 	var err error
-
 	if tpUser.IsL2 {
 		nodeName := nodeNameFromUnicode(loc.Unicode)
 		remoteUserHost := fmt.Sprintf("%s@%s", nodeName, nodeName)
-		remoteCommand := fmt.Sprintf("bash -c '%s'", lsCmd)
-
-		cmd := exec.Command("tsh", "ssh", remoteUserHost, remoteCommand)
+		cmd := exec.Command("tsh", "ssh", remoteUserHost, fmt.Sprintf("bash -c '%s'", lsCmd))
 		out, err = cmd.Output()
 	} else {
 		cmd := exec.Command("sshpass", "-p", SshPass,
@@ -2118,16 +2114,13 @@ func listRemoteDir(tpUser *TeleportUser, loc *Location, remoteDir string) ([]str
 		)
 		out, err = cmd.Output()
 	}
-
 	if err != nil {
 		return nil, fmt.Errorf("remote execution failed: %w (output: %s)", err, string(out))
 	}
-
 	raw := strings.TrimSpace(string(out))
 	if raw == "" {
 		return nil, fmt.Errorf("direktori %s kosong atau tidak dapat diakses", remoteDir)
 	}
-
 	lines := strings.Split(raw, "\n")
 	var files []string
 	for _, l := range lines {
@@ -2145,7 +2138,6 @@ func listRemoteDir(tpUser *TeleportUser, loc *Location, remoteDir string) ([]str
 		display := fmt.Sprintf("%-40s  %6s  %s", filename, size, date)
 		files = append(files, display)
 	}
-
 	return files, nil
 }
 
@@ -2368,24 +2360,22 @@ func listGateLogFiles(tpUser *TeleportUser, loc *Location, gate GateInfo, remote
 	var out []byte
 	var err error
 
+	// Pakai double quote (\") untuk membungkus command internal gate agar tidak merusak shell parsing di Server POS
+	lsCmd := fmt.Sprintf(
+		"sshpass -p '%s' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 %s@%s \"ls -lhtr %s 2>/dev/null | tail -30\"",
+		gatePass, gateUser, gate.IP, remotePath,
+	)
+
 	if tpUser.IsL2 {
-		lsCmd := fmt.Sprintf(
-			"sshpass -p '%s' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 %s@%s 'ls -lhtr %s 2>/dev/null | tail -30'",
-			gatePass, gateUser, gate.IP, remotePath,
-		)
 		cmd := exec.Command("sshpass", "-p", SshPass,
 			"ssh",
 			"-o", "StrictHostKeyChecking=no",
 			"-o", "ConnectTimeout=5",
-			fmt.Sprintf("parkee@10.70.0.110"),
+			"parkee@10.70.0.110",
 			lsCmd,
 		)
 		out, err = cmd.Output()
 	} else {
-		lsCmd := fmt.Sprintf(
-			"sshpass -p '%s' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 %s@%s 'ls -lhtr %s 2>/dev/null | tail -30'",
-			gatePass, gateUser, gate.IP, remotePath,
-		)
 		cmd := exec.Command("sshpass", "-p", SshPass,
 			"ssh",
 			"-o", "StrictHostKeyChecking=no",
@@ -2422,54 +2412,6 @@ func listGateLogFiles(tpUser *TeleportUser, loc *Location, gate GateInfo, remote
 		files = append(files, display)
 	}
 	return files, nil
-}
-
-func grepKeywordInGateLogs(tpUser *TeleportUser, loc *Location, gate GateInfo, remotePath string, keyword string) ([]string, error) {
-	gatePass := fmt.Sprintf("pc%sclient", strings.ToLower(loc.Unicode))
-
-	grepCmd := fmt.Sprintf(
-		"sshpass -p '%s' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 %s@%s 'grep -rl \"%s\" %s 2>/dev/null | xargs -I{} basename {}'",
-		gatePass, gate.UserPC, gate.IP, keyword, remotePath,
-	)
-
-	var out []byte
-	var err error
-
-	if tpUser.IsL2 {
-		nodeName := nodeNameFromUnicode(loc.Unicode)
-		cmd := exec.Command("tsh", "ssh",
-			fmt.Sprintf("%s@%s", nodeName, nodeName),
-			grepCmd,
-		)
-		out, err = cmd.Output()
-	} else {
-		cmd := exec.Command("sshpass", "-p", SshPass,
-			"ssh",
-			"-o", "StrictHostKeyChecking=no",
-			"-o", "ConnectTimeout=5",
-			fmt.Sprintf("support@%s", loc.IP),
-			grepCmd,
-		)
-		out, err = cmd.Output()
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("grep gagal: %w", err)
-	}
-
-	raw := strings.TrimSpace(string(out))
-	if raw == "" {
-		return nil, nil
-	}
-
-	var matched []string
-	for _, l := range strings.Split(raw, "\n") {
-		l = strings.TrimSpace(l)
-		if l != "" {
-			matched = append(matched, l)
-		}
-	}
-	return matched, nil
 }
 
 func fetchAgentGateLog(tpUser *TeleportUser, loc *Location, remotePath string, logLabel string) {
@@ -2533,52 +2475,7 @@ func fetchAgentGateLog(tpUser *TeleportUser, loc *Location, remotePath string, l
 			continue
 		}
 
-		// ── keyword grep filter ──
-		var keyword string
-		keywordForm := huh.NewForm(
-			huh.NewGroup(
-				huh.NewInput().
-					Title("Filter log by keyword (opsional):").
-					Description("Nomor polisi, parking slip, wuzz ID, dll. Kosongkan untuk tampilkan semua.").
-					Placeholder("contoh: B1234XYZ atau WUZZ-001").
-					Value(&keyword),
-			),
-		).WithTheme(crushTheme())
-		_ = keywordForm.Run()
-
-		keyword = strings.TrimSpace(keyword)
-
-		filteredFiles := files
-		if keyword != "" {
-			logInfo(fmt.Sprintf("Grep '%s' di %d file, bentar men...", keyword, len(files)))
-			matchedNames, grepErr := grepKeywordInGateLogs(tpUser, loc, selectedGate, remotePath, keyword)
-			if grepErr != nil {
-				logWarn("Grep gagal, nampilin semua file aja: " + grepErr.Error())
-			} else if len(matchedNames) == 0 {
-				logWarn(fmt.Sprintf("Keyword '%s' ga ketemu di log manapun, nampilin semua.", keyword))
-			} else {
-				matchedSet := make(map[string]bool)
-				for _, m := range matchedNames {
-					matchedSet[m] = true
-				}
-				var tmp []string
-				for _, f := range files {
-					fname := strings.Fields(f)[0]
-					if matchedSet[fname] {
-						tmp = append(tmp, f)
-					}
-				}
-				if len(tmp) > 0 {
-					filteredFiles = tmp
-					logOK(fmt.Sprintf("%d file mengandung keyword '%s'", len(filteredFiles), keyword))
-				} else {
-					logWarn("Ga ada match setelah filter, nampilin semua.")
-				}
-			}
-			fmt.Println()
-		}
-
-		fileOpts := make([]huh.Option[string], 0, len(filteredFiles)+1)
+		fileOpts := make([]huh.Option[string], 0, len(files)+1)
 		fileOpts = append(fileOpts, huh.NewOption("← Balik ke Pilih Gate", "back"))
 		for _, f := range files {
 			fileOpts = append(fileOpts, huh.NewOption(f, f))
