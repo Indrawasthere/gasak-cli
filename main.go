@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -23,7 +25,7 @@ import (
 )
 
 const (
-	AppVersion = "1.5.9"
+	AppVersion = "1.5.10"
 )
 
 var (
@@ -2353,41 +2355,219 @@ func parseGateOutput(output string) ([]GateInfo, error) {
 	return gates, nil
 }
 
-func listGateLogFiles(tpUser *TeleportUser, loc *Location, gate GateInfo, remotePath string) ([]string, error) {
-	gatePass := fmt.Sprintf("pc%sclient", strings.ToLower(loc.Unicode))
-	gateUser := resolveGateUsername(gate.UserPC, loc.Unicode)
+// fetchGateUserOverride nanya ke vault-server apakah ada override username yang udah kebukti jalan buat IP gate ini
+// return ("", false) kalo belum ada override tersimpan (404) atau request gagal — caller tetep lanjut attempt normal
+func fetchGateUserOverride(gateIP string) (string, bool) {
+	client := &http.Client{Timeout: 8 * time.Second}
+	req, err := http.NewRequest("GET",
+		fmt.Sprintf(VaultServerURL+"/api/gate-override?ip=%s", gateIP),
+		nil,
+	)
+	if err != nil {
+		return "", false
+	}
+	req.Header.Set("X-Gasak-Token", GasakDistToken)
 
-	var out []byte
-	var err error
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", false
+	}
+	defer resp.Body.Close()
 
-	// Pakai double quote (\") untuk membungkus command internal gate agar tidak merusak shell parsing di Server POS
+	if resp.StatusCode == http.StatusNotFound {
+		return "", false
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", false
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", false
+	}
+
+	var payload struct {
+		Username string `json:"username"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil || payload.Username == "" {
+		return "", false
+	}
+	return payload.Username, true
+}
+
+// saveGateUserOverrideRemote nyimpen username yang udah kebukti jalan ke vault-server, dipake bareng-bareng L1/L2
+func saveGateUserOverrideRemote(gateIP string, username string) error {
+	client := &http.Client{Timeout: 8 * time.Second}
+	payload, err := json.Marshal(map[string]string{
+		"ip":       gateIP,
+		"username": username,
+	})
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("POST",
+		VaultServerURL+"/api/gate-override",
+		bytes.NewReader(payload),
+	)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Gasak-Token", GasakDistToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("vault error (%d): %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// isMissingSSHPass cek apakah error-nya karena node loc ga punya sshpass ke-install
+// ini infra issue di node, BUKAN masalah gate-nya — pesan error harus dibedain biar ga misleading
+func isMissingSSHPass(output string) bool {
+	return strings.Contains(output, "command not found: sshpass") ||
+		strings.Contains(output, "sshpass: not found") ||
+		strings.Contains(output, "sshpass: command not found")
+}
+
+var (
+	ErrGateInfraIssue = errors.New("gate infra issue")
+	ErrGateAuthIssue  = errors.New("gate auth issue")
+)
+
+// classifyGateError ngebungkus raw error jadi pesan yang actionable, bedain infra issue vs auth issue vs gate down
+func classifyGateError(loc *Location, err error, output string) error {
+	if isMissingSSHPass(output) {
+		return fmt.Errorf(
+			"%w: sshpass belom keinstall di node %s bre, bukan gate-nya yang mati — infra node-nya aja yang belom siap. Pake Teleport Web UI dulu ya, infra-nya di-notif buat install sshpass",
+			ErrGateInfraIssue, strings.ToUpper(loc.Unicode),
+		)
+	}
+	if isSSHAuthFailure(err, output) {
+		return fmt.Errorf(
+			"%w: nama gate di lokasi ini emang random parah, udah dicoba beberapa pola tapi auth tetep ditolak. SSH manual dulu ke gate-nya buat cek username yang bener, atau pake Teleport Web UI",
+			ErrGateAuthIssue,
+		)
+	}
+	return fmt.Errorf("gagal konek ke gate: %w (output: %s)", err, output)
+}
+
+// isSSHAuthFailure cek apakah error dari sshpass itu spesifik karena password/login ditolak
+// sshpass punya exit code 5 khusus buat "permission denied" / auth gagal, beda sama network timeout dll
+func isSSHAuthFailure(err error, output string) bool {
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		if exitErr.ExitCode() == 5 {
+			return true
+		}
+	}
+	return strings.Contains(output, "Permission denied")
+}
+
+// execGateLsCmd jalanin ls -lht di gate lewat 1 hop (tsh buat L2, sshpass buat L1) dengan username tertentu
+func execGateLsCmd(tpUser *TeleportUser, loc *Location, gateUser string, gatePass string, gate GateInfo, remotePath string) ([]byte, error) {
+	// Pakai double quote (\") untuk membungkus command internal gate agar tidak merusak shell parsing di loc server
+	// ls -lht | head dipake (bukan ls -lhtr | tail) biar file terbaru yang muncul, bukan file lama
 	lsCmd := fmt.Sprintf(
-		"sshpass -p '%s' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 %s@%s \"ls -lhtr %s 2>/dev/null | tail -30\"",
+		"sshpass -p '%s' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 %s@%s \"ls -lht %s 2>&1 | grep -v ^total | head -30\"",
 		gatePass, gateUser, gate.IP, remotePath,
 	)
 
 	if tpUser.IsL2 {
-		cmd := exec.Command("sshpass", "-p", SshPass,
-			"ssh",
-			"-o", "StrictHostKeyChecking=no",
-			"-o", "ConnectTimeout=5",
-			"parkee@10.70.0.110",
+		// L2 wajib jump via tsh ke node loc nya, BUKAN ssh password ke parkee@10.70.0.110
+		// karena loc server udah punya akses LAN langsung ke gate, ga butuh hop tambahan ke supeng
+		nodeName := nodeNameFromUnicode(loc.Unicode)
+		cmd := exec.Command("tsh", "ssh",
+			fmt.Sprintf("%s@%s", nodeName, nodeName),
 			lsCmd,
 		)
-		out, err = cmd.Output()
-	} else {
-		cmd := exec.Command("sshpass", "-p", SshPass,
-			"ssh",
-			"-o", "StrictHostKeyChecking=no",
-			"-o", "ConnectTimeout=5",
-			fmt.Sprintf("support@%s", loc.IP),
-			lsCmd,
-		)
-		out, err = cmd.Output()
+		return cmd.CombinedOutput()
 	}
 
-	if err != nil {
-		return nil, fmt.Errorf("gagal list file di gate: %w", err)
+	cmd := exec.Command("sshpass", "-p", SshPass,
+		"ssh",
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "ConnectTimeout=5",
+		fmt.Sprintf("support@%s", loc.IP),
+		lsCmd,
+	)
+	return cmd.CombinedOutput()
+}
+
+func listGateLogFiles(tpUser *TeleportUser, loc *Location, gate GateInfo, remotePath string) ([]string, error) {
+	gatePass := fmt.Sprintf("pc%sclient", strings.ToLower(loc.Unicode))
+	rawUser := strings.ToLower(gate.UserPC)
+
+	var out []byte
+	var err error
+	found := false
+
+	// Attempt 0: override yang udah pernah ke-save di vault-server buat IP ini (shared antar L1/L2, paling reliable)
+	if overrideUser, ok := fetchGateUserOverride(gate.IP); ok {
+		out, err = execGateLsCmd(tpUser, loc, overrideUser, gatePass, gate, remotePath)
+		if err == nil {
+			found = true
+		} else if isMissingSSHPass(string(out)) {
+			return nil, classifyGateError(loc, err, string(out))
+		}
+	}
+
+	// Attempt 1: username utuh dari user_pc (konsisten sama grepKeywordInGateLogs & reader-update flow yang udah jalan)
+	if !found {
+		out, err = execGateLsCmd(tpUser, loc, rawUser, gatePass, gate, remotePath)
+		if err == nil {
+			found = true
+		} else if isMissingSSHPass(string(out)) {
+			return nil, classifyGateError(loc, err, string(out))
+		}
+	}
+
+	// Attempt 2: fallback ke versi stripped, buat jaga-jaga ada lokasi yang emang butuh username tanpa suffix unicode
+	if !found && isSSHAuthFailure(err, string(out)) {
+		strippedUser := resolveGateUsername(gate.UserPC, loc.Unicode)
+		if strippedUser != rawUser {
+			logWarn(fmt.Sprintf("Auth gagal pake username '%s', nyoba fallback ke '%s'...", rawUser, strippedUser))
+			out, err = execGateLsCmd(tpUser, loc, strippedUser, gatePass, gate, remotePath)
+			if err == nil {
+				found = true
+			}
+		}
+	}
+
+	// Attempt 3: semua pola otomatis gagal — user_pc di DB emang ga konsisten/typo, minta operator input manual
+	if !found && isSSHAuthFailure(err, string(out)) {
+		logWarn(fmt.Sprintf("Username '%s' dan versi stripped-nya dua-duanya gagal auth ke %s.", rawUser, gate.IP))
+		var manualUser string
+		manualForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title(fmt.Sprintf("Ketik username SSH gate yang bener buat %s [%s] (kosongin buat skip):", gate.UserPC, gate.IP)).
+					Value(&manualUser),
+			),
+		).WithTheme(crushTheme())
+
+		if formErr := manualForm.Run(); formErr == nil && strings.TrimSpace(manualUser) != "" {
+			manualUser = strings.TrimSpace(manualUser)
+			out, err = execGateLsCmd(tpUser, loc, manualUser, gatePass, gate, remotePath)
+			if err == nil {
+				found = true
+				if saveErr := saveGateUserOverrideRemote(gate.IP, manualUser); saveErr != nil {
+					logWarn("Username jalan tapi gagal nyimpen override ke vault: " + saveErr.Error())
+				} else {
+					logOK(fmt.Sprintf("Mantap, username '%s' jalan! Udah disimpen di vault, tim lain ga perlu nemu ulang.", manualUser))
+				}
+			}
+		}
+	}
+
+	if !found {
+		return nil, classifyGateError(loc, err, string(out))
 	}
 
 	raw := strings.TrimSpace(string(out))
@@ -2467,7 +2647,14 @@ func fetchAgentGateLog(tpUser *TeleportUser, loc *Location, remotePath string, l
 		files, err := listGateLogFiles(tpUser, loc, selectedGate, remotePath)
 		if err != nil {
 			logErr("Gagal list file di gate: " + err.Error())
-			logWarn("Cek: gate PC nyala ga?")
+			switch {
+			case errors.Is(err, ErrGateInfraIssue):
+				logWarn("Ini infra node, bukan gate yang mati. Pake Teleport Web UI dulu buat sementara.")
+			case errors.Is(err, ErrGateAuthIssue):
+				logWarn("Kemungkinan password gate berubah, atau emang exception dari pola pc{unicode}client.")
+			default:
+				logWarn("Cek: gate PC nyala ga?")
+			}
 			fmt.Println()
 			fmt.Println(dimStyle.Render("  [enter] balik ke pilih gate..."))
 			fmt.Scanln()

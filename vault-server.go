@@ -15,13 +15,26 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
 const (
-	VaultPort = 9002
-	LogFile   = "vault_server.log"
+	VaultPort        = 9002
+	LogFile          = "vault_server.log"
+	GateOverrideFile = "gate_overrides.json"
+)
+
+type GateOverrideEntry struct {
+	Username  string `json:"username"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+var (
+	gateOverrideMu    sync.Mutex
+	gateOverrideStore = map[string]GateOverrideEntry{}
 )
 
 type SecretPayload struct {
@@ -79,10 +92,14 @@ func main() {
 	_ = os.WriteFile(LogFile, []byte(""), 0644)
 	log.Printf("[INIT] GASAK Vault Server berjalan pada port :%d", VaultPort)
 
+	loadGateOverrideStore()
+
 	http.HandleFunc("/getenv", handleGetEnv)
 	http.HandleFunc("/health", handleHealth)
 	http.HandleFunc("/api/locate-gate", handleLocateGate)
 	http.HandleFunc("/api/ploc", handlePloc)
+	http.HandleFunc("/api/gate-override", handleGateOverride)
+	http.HandleFunc("/api/gate-override/all", handleGateOverrideAll)
 
 	err := http.ListenAndServe(fmt.Sprintf(":%d", VaultPort), nil)
 	if err != nil {
@@ -351,6 +368,172 @@ ORDER BY user_pc, created_at DESC;
 	}
 
 	return gates, nil
+}
+
+// handleGateOverride ngurus mapping IP gate -> username SSH yang udah kebukti jalan.
+// Ini BUKAN secret/credential, cuma metadata operasional — makanya disimpen plain JSON,
+// ga lewat hybrid RSA+AES encryption kayak handleGetEnv. Auth tetep wajib via X-Gasak-Token
+// biar ga sembarang orang bisa nge-poison mapping username gate orang lain.
+func handleGateOverride(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	token := r.Header.Get("X-Gasak-Token")
+	expectedToken := os.Getenv("GASAK_DIST_TOKEN")
+	if token != expectedToken {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Unauthorized"})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		handleGateOverrideGet(w, r)
+	case http.MethodPost:
+		handleGateOverridePost(w, r)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func handleGateOverrideGet(w http.ResponseWriter, r *http.Request) {
+	ip := strings.TrimSpace(r.URL.Query().Get("ip"))
+	if ip == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "ip kosong"})
+		return
+	}
+
+	gateOverrideMu.Lock()
+	entry, ok := gateOverrideStore[ip]
+	gateOverrideMu.Unlock()
+
+	if !ok {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "belum ada override buat ip ini"})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{"username": entry.Username})
+	logAccess(r, http.StatusOK, "gate-override GET: "+ip)
+}
+
+func handleGateOverridePost(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IP       string `json:"ip"`
+		Username string `json:"username"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "body invalid: " + err.Error()})
+		return
+	}
+
+	ip := strings.TrimSpace(body.IP)
+	username := strings.TrimSpace(body.Username)
+	if ip == "" || username == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "ip atau username kosong"})
+		return
+	}
+
+	gateOverrideMu.Lock()
+	gateOverrideStore[ip] = GateOverrideEntry{
+		Username:  username,
+		UpdatedAt: time.Now().Format(time.RFC3339),
+	}
+	saveErr := persistGateOverrideStore()
+	gateOverrideMu.Unlock()
+
+	if saveErr != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "gagal nyimpen ke disk: " + saveErr.Error()})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	logAccess(r, http.StatusOK, fmt.Sprintf("gate-override POST: %s -> %s", ip, username))
+}
+
+// loadGateOverrideStore baca file gate_overrides.json pas startup, kalo belum ada ya skip aja (store kosong)
+func loadGateOverrideStore() {
+	gateOverrideMu.Lock()
+	defer gateOverrideMu.Unlock()
+
+	data, err := os.ReadFile(GateOverrideFile)
+	if err != nil {
+		log.Printf("[INIT] gate_overrides.json belum ada, mulai dari kosong")
+		return
+	}
+
+	var store map[string]GateOverrideEntry
+	if err := json.Unmarshal(data, &store); err != nil {
+		log.Printf("[WARN] gate_overrides.json corrupt, mulai dari kosong: %v", err)
+		return
+	}
+
+	gateOverrideStore = store
+	log.Printf("[INIT] Loaded %d gate override(s) dari disk", len(store))
+}
+
+// persistGateOverrideStore wajib dipanggil dalam keadaan gateOverrideMu udah ke-lock
+func persistGateOverrideStore() error {
+	data, err := json.MarshalIndent(gateOverrideStore, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(GateOverrideFile, data, 0644)
+}
+
+// handleGateOverrideAll buat audit — liat semua mapping IP gate -> username yang udah pernah ke-save
+// dipake buat ngecek pola kerandoman naming gate per lokasi, bukan buat operasional sehari-hari
+func handleGateOverrideAll(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	token := r.Header.Get("X-Gasak-Token")
+	expectedToken := os.Getenv("GASAK_DIST_TOKEN")
+	if token != expectedToken {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Unauthorized"})
+		return
+	}
+
+	gateOverrideMu.Lock()
+	snapshot := make(map[string]GateOverrideEntry, len(gateOverrideStore))
+	for ip, entry := range gateOverrideStore {
+		snapshot[ip] = entry
+	}
+	gateOverrideMu.Unlock()
+
+	ips := make([]string, 0, len(snapshot))
+	for ip := range snapshot {
+		ips = append(ips, ip)
+	}
+	sort.Strings(ips)
+
+	type auditRow struct {
+		IP        string `json:"ip"`
+		Username  string `json:"username"`
+		UpdatedAt string `json:"updated_at"`
+	}
+	rows := make([]auditRow, 0, len(ips))
+	for _, ip := range ips {
+		entry := snapshot[ip]
+		rows = append(rows, auditRow{IP: ip, Username: entry.Username, UpdatedAt: entry.UpdatedAt})
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"total":     len(rows),
+		"overrides": rows,
+	})
+	logAccess(r, http.StatusOK, fmt.Sprintf("gate-override/all GET: %d entries", len(rows)))
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
