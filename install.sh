@@ -8,10 +8,10 @@
 set -uo pipefail
 
 # ─── CONFIGURATION ────────────────────────────────────────────
-SERVER_IP="10.70.0.110"
+SERVER_IP="${GASAK_DIST_URL}"
 SERVER_PORT="9001"
 VAULT_PORT="9002"
-GASAK_DIST_TOKEN="gsk_dist_9f2k7x"
+GASAK_DIST_TOKEN="${GASAK_DIST_TOKEN}"
 BASE_URL="http://${SERVER_IP}:${SERVER_PORT}"
 VAULT_URL="http://${SERVER_IP}:${VAULT_PORT}"
 

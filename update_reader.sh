@@ -13,10 +13,10 @@ SCRIPT_ZIP="${SCRIPT_NAME}.zip"
 
 PARKEE_FOLDER='/opt/app/agent/parkee-agent'
 PARKEE_SSH_PROP="${PARKEE_FOLDER}/server.properties"
-PARKEE_SSH_USER="${PARKEE_SSH_USER}"
+PARKEE_SSH_USER="${PARKEE_SSH_USER:-support}"
 PARKEE_SSH_PASS="${PARKEE_SSH_PASS}"
 PARKEE_SSH_IP=$(grep -oP '^dbHost=\K.*' "$PARKEE_SSH_PROP")
-PARKEE_SSH_SOURCE='/home/support'
+PARKEE_SSH_SOURCE="${PARKEE_SSH_SOURCE:-/home/support}"
 PARKEE_SSH_SERVER="${PARKEE_SSH_USER}@${PARKEE_SSH_IP}"
 PARKEE_SSH_OPT="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
@@ -512,7 +512,7 @@ update_reader() {
 	# Pastikan FW_ZIP & SCRIPT_ZIP ada di server — kalau tidak, hit API
 	# ===================================================================
 	ensure_files_on_server(){
-		local API_BASE="${GASAK_DIST_URL}"
+		local API_BASE="http://10.70.0.110:9001"
 
 		echo -e "====================================================="
 		echo -e "=======🔍CHECKING FILES AVAILABILITY ON SERVER======="
@@ -1272,12 +1272,12 @@ if ! command -v sshpass &> /dev/null; then
 sudo apt update && sudo apt install sshpass -y
 fi
 
-if ! ssh root@192.168.1.199 "cat /apps/parque/data/config.ini | grep 'READER' -A 3"; then
+if ! ssh "${USERNAME_READER}@${READER_COHERENT_IP}" "cat /apps/parque/data/config.ini | grep 'READER' -A 3"; then
 echo -e "Can't Connect Reader"
 fi
 
 echo -e "\nPSAM DKI Information : "
-if ! ssh root@192.168.1.199 "cat /apps/parque/data/config.ini | grep 'DKI' -A 4"; then
+if ! ssh "${USERNAME_READER}@${READER_COHERENT_IP}" "cat /apps/parque/data/config.ini | grep 'DKI' -A 4"; then
 echo -e "Can't Connect Reader"
 fi
 
