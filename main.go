@@ -2586,7 +2586,13 @@ func listGateLogFiles(tpUser *TeleportUser, loc *Location, gate GateInfo, remote
 	return files, nil
 }
 
+var gateGrepKeywordPattern = regexp.MustCompile(`^[a-zA-Z0-9_\-\s]+$`)
+
 func grepKeywordInGateLogs(tpUser *TeleportUser, loc *Location, gate GateInfo, remotePath string, keyword string) ([]string, error) {
+	if !gateGrepKeywordPattern.MatchString(keyword) {
+		return nil, fmt.Errorf("keyword cuma boleh huruf, angka, spasi, underscore, sama strip men")
+	}
+
 	gatePass := fmt.Sprintf("pc%sclient", strings.ToLower(loc.Unicode))
 
 	grepCmd := fmt.Sprintf(
@@ -2759,7 +2765,7 @@ func fetchAgentGateLog(tpUser *TeleportUser, loc *Location, remotePath string, l
 				huh.NewGroup(
 					huh.NewSelect[string]().
 						Title(fmt.Sprintf("Pilih file log dari %s:", selectedGate.UserPC)).
-						Description(fmt.Sprintf("%d file di %s", len(files), remotePath)).
+						Description(fmt.Sprintf("%d file di %s", len(filteredFiles), remotePath)).
 						Options(fileOpts...).
 						Value(&selectedFile).
 						Filtering(true),
