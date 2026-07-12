@@ -191,7 +191,7 @@ sudo chown -R $USER:$GROUP $HOME/.ssh
 #fi
 
 ssh-keygen -t rsa -b 4096 -f "$SSH_KEY_PATH" -N ""
-sshpass -p "${PASSWORD_READER}" ssh-copy-id -o StrictHostKeyChecking=no "${SSH_READER}"
+SSHPASS="${PASSWORD_READER}" sshpass -e ssh-copy-id -o StrictHostKeyChecking=no "${SSH_READER}"
 
 cd $HOME/
 
@@ -492,7 +492,7 @@ update_reader() {
 		fi
 		sudo chown -R $USER:$GROUP $HOME/.ssh
 		ssh-keygen -t rsa -b 4096 -f "$SSH_KEY_PATH" -N ""
-		sshpass -p "${PASSWORD_READER}" ssh-copy-id -o StrictHostKeyChecking=no "${SSH_READER}"
+		SSHPASS="${PASSWORD_READER}" sshpass -e ssh-copy-id -o StrictHostKeyChecking=no "${SSH_READER}"
 		cd $HOME/
 	}
 
@@ -520,15 +520,15 @@ update_reader() {
 
 		# --- FIRMWARE ---
 		echo -e "🔍 CHECK $FW_ZIP ON SERVER..."
-		#if sshpass -p "${PARKEE_SSH_PASS}" ssh "${PARKEE_SSH_SERVER}" "[ -f ${PARKEE_SSH_SOURCE}/${FW_ZIP} ]"; then
-		if sshpass -p "${PARKEE_SSH_PASS}" ssh ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" "[ -f ${PARKEE_SSH_SOURCE}/${FW_ZIP} ]"; then
+		#if SSHPASS="${PARKEE_SSH_PASS}" sshpass -e ssh "${PARKEE_SSH_SERVER}" "[ -f ${PARKEE_SSH_SOURCE}/${FW_ZIP} ]"; then
+		if SSHPASS="${PARKEE_SSH_PASS}" sshpass -e ssh ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" "[ -f ${PARKEE_SSH_SOURCE}/${FW_ZIP} ]"; then
 			echo -e "✅ $FW_ZIP ALREADY EXISTS ON SERVER\n"
 		else
 			echo -e "⚠️  $FW_ZIP NOT FOUND ON SERVER, FETCHING FROM API...\n"
 			echo -e "====================================================="
 			echo -e "======📥API DOWNLOAD $FW_ZIP TO SERVER📥============"
 			echo -e "=====================================================\n"
-			if sshpass -p "${PARKEE_SSH_PASS}" ssh ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" \
+			if SSHPASS="${PARKEE_SSH_PASS}" sshpass -e ssh ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" \
 				"curl -f -o ${PARKEE_SSH_SOURCE}/${FW_ZIP} ${API_BASE}/${FW_ZIP}"; then
 				echo -e "====================================================="
 				echo -e "======✅API DOWNLOAD $FW_ZIP DONE✅================="
@@ -543,15 +543,15 @@ update_reader() {
 
 		# --- Cek & fetch SCRIPT ---
 		echo -e "🔍 CHECK $SCRIPT_ZIP ON SERVER..."
-		#if sshpass -p "${PARKEE_SSH_PASS}" ssh "${PARKEE_SSH_SERVER}" "[ -f ${PARKEE_SSH_SOURCE}/${SCRIPT_ZIP} ]"; then
-		if sshpass -p "${PARKEE_SSH_PASS}" ssh ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" "[ -f ${PARKEE_SSH_SOURCE}/${SCRIPT_ZIP} ]"; then
+		#if SSHPASS="${PARKEE_SSH_PASS}" sshpass -e ssh "${PARKEE_SSH_SERVER}" "[ -f ${PARKEE_SSH_SOURCE}/${SCRIPT_ZIP} ]"; then
+		if SSHPASS="${PARKEE_SSH_PASS}" sshpass -e ssh ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" "[ -f ${PARKEE_SSH_SOURCE}/${SCRIPT_ZIP} ]"; then
 			echo -e "✅ $SCRIPT_ZIP ALREADY EXISTS ON SERVER\n"
 		else
 			echo -e "⚠️  $SCRIPT_ZIP NOT FOUND ON SERVER, FETCHING FROM API...\n"
 			echo -e "====================================================="
 			echo -e "======📥API DOWNLOAD $SCRIPT_ZIP TO SERVER📥========"
 			echo -e "=====================================================\n"
-			if sshpass -p "${PARKEE_SSH_PASS}" ssh ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" \
+			if SSHPASS="${PARKEE_SSH_PASS}" sshpass -e ssh ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" \
 				"curl -f -o ${PARKEE_SSH_SOURCE}/${SCRIPT_ZIP} ${API_BASE}/${SCRIPT_ZIP}"; then
 				echo -e "====================================================="
 				echo -e "======✅API DOWNLOAD $SCRIPT_ZIP DONE✅============="
@@ -576,7 +576,7 @@ update_reader() {
 		echo -e "====================================================="
 		echo -e "======📥SCP FIRMWARE v${FW_VERSION} FROM SERVER📥======="
 		echo -e "=====================================================\n"
-		if sshpass -p "${PARKEE_SSH_PASS}" scp ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}:${PARKEE_SSH_SOURCE}/${FW_ZIP}" "$DOWNLOAD_DIR/$FW_ZIP"; then
+		if SSHPASS="${PARKEE_SSH_PASS}" sshpass -e scp ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}:${PARKEE_SSH_SOURCE}/${FW_ZIP}" "$DOWNLOAD_DIR/$FW_ZIP"; then
 			echo -e "====================================================="
 			echo -e "=========✅SCP FIRMWARE v${FW_VERSION} DONE✅==========="
 			echo -e "=====================================================\n"
@@ -693,7 +693,7 @@ update_reader() {
 		echo -e "====================================================="
 		echo -e "==========📥SCP SCRIPT FROM SERVER📥================"
 		echo -e "=====================================================\n"
-		if sshpass -p "${PARKEE_SSH_PASS}" scp ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}:${PARKEE_SSH_SOURCE}/${SCRIPT_ZIP}" "$DOWNLOAD_DIR/$SCRIPT_ZIP"; then
+		if SSHPASS="${PARKEE_SSH_PASS}" sshpass -e scp ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}:${PARKEE_SSH_SOURCE}/${SCRIPT_ZIP}" "$DOWNLOAD_DIR/$SCRIPT_ZIP"; then
 			echo -e "====================================================="
 			echo -e "=========✅SCP SCRIPT FROM SERVER DONE✅============="
 			echo -e "=====================================================\n"
@@ -855,7 +855,7 @@ update_reader() {
 		echo -e "=====================================================\n"
 
 		echo -e "🔄DELETE $FW_ZIP ON SERVER🔄"
-		sshpass -p "${PARKEE_SSH_PASS}" ssh ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" <<EOF 2>/dev/null
+		SSHPASS="${PARKEE_SSH_PASS}" sshpass -e ssh ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" <<EOF 2>/dev/null
 rm ${PARKEE_SSH_SOURCE}/${FW_ZIP}
 EOF
 		if [ $? -eq 0 ]; then
@@ -865,7 +865,7 @@ EOF
 		fi
 
 		echo -e "🔄DELETE $SCRIPT_ZIP ON SERVER🔄"
-		sshpass -p "${PARKEE_SSH_PASS}" sftp ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" <<EOF 2>/dev/null
+		SSHPASS="${PARKEE_SSH_PASS}" sshpass -e sftp ${PARKEE_SSH_OPT} "${PARKEE_SSH_SERVER}" <<EOF 2>/dev/null
 rm ${PARKEE_SSH_SOURCE}/${SCRIPT_ZIP}
 EOF
 		if [ $? -eq 0 ]; then
@@ -1578,12 +1578,12 @@ echo -e "Device Information : "
 #sudo apt update && sudo apt install sshpass -y
 #fi
 
-if ! sshpass -p "$PASSWORD_READER" ssh -o StrictHostKeyChecking=no "$SSH_READER" "cat /apps/parque/data/config.ini | grep 'READER' -A 3"; then
+if ! SSHPASS="$PASSWORD_READER" sshpass -e ssh -o StrictHostKeyChecking=no "$SSH_READER" "cat /apps/parque/data/config.ini | grep 'READER' -A 3"; then
 echo -e "Can't Connect Reader"
 fi
 
 echo -e "\nPSAM DKI Information : "
-if ! sshpass -p "$PASSWORD_READER" ssh -o StrictHostKeyChecking=no "$SSH_READER" "cat /apps/parque/data/config.ini | grep 'DKI' -A 4"; then
+if ! SSHPASS="$PASSWORD_READER" sshpass -e ssh -o StrictHostKeyChecking=no "$SSH_READER" "cat /apps/parque/data/config.ini | grep 'DKI' -A 4"; then
 echo -e "Can't Connect Reader"
 fi
 

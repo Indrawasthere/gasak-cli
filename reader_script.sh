@@ -68,7 +68,7 @@ bypass_reader(){
    sudo chown -R $USER:$GROUP $HOME/.ssh
 
    ssh-keygen -t rsa -b 4096 -f "$SSH_KEY_PATH" -N ""
-   sshpass -p "${PASSWORD_READER}" ssh-copy-id -o StrictHostKeyChecking=no "${SSH_READER}"
+   SSHPASS="${PASSWORD_READER}" sshpass -e ssh-copy-id -o StrictHostKeyChecking=no "${SSH_READER}"
 
    cd $HOME/
 }
@@ -1334,8 +1334,8 @@ EOF
    sudo mv ~/Music/server.properties /opt/app/agent/parkee-agent/server.properties
    fi
 
-   if ! sudo sshpass -p "${SUPPORT_SSH_PASS}${AGENT_DB_SUFFIX}" rsync -avz --progress -e "ssh -o StrictHostKeyChecking=no" support@${AGENT_SERVER_HOST}:/mnt/shared/{production/parkee-agent-production.jar,dependencies,sound} /opt/app/agent/parkee-agent/; then
-      sudo sshpass -p "${SUPPORT_SSH_PASS}${AGENT_DB_SUFFIX}" rsync -avz --progress -e "ssh -p ${AGENT_SSH_PORT_ALT} -o StrictHostKeyChecking=no" support@${AGENT_SERVER_HOST}:/mnt/shared/{production/parkee-agent-production.jar,dependencies,sound} /opt/app/agent/parkee-agent/
+   if ! sudo env SSHPASS="${SUPPORT_SSH_PASS}${AGENT_DB_SUFFIX}" sshpass -e rsync -avz --progress -e "ssh -o StrictHostKeyChecking=no" support@${AGENT_SERVER_HOST}:/mnt/shared/{production/parkee-agent-production.jar,dependencies,sound} /opt/app/agent/parkee-agent/; then
+      sudo env SSHPASS="${SUPPORT_SSH_PASS}${AGENT_DB_SUFFIX}" sshpass -e rsync -avz --progress -e "ssh -p ${AGENT_SSH_PORT_ALT} -o StrictHostKeyChecking=no" support@${AGENT_SERVER_HOST}:/mnt/shared/{production/parkee-agent-production.jar,dependencies,sound} /opt/app/agent/parkee-agent/
    fi
 
    echo -e "Check All File for Parkee Agent - Done\n"
