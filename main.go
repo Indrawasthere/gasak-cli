@@ -830,13 +830,13 @@ func runTSHLogin() {
 	logInfo("Gasak Teleport Login...")
 	fmt.Println(dimStyle.Render("  Using flag --add-keys-to-agent=no (fix OpenSSH compat)"))
 	fmt.Println()
-	runInteractive("tsh", "login", "--add-keys-to-agent=no")
+	runInteractive("tsh", nil, "login", "--add-keys-to-agent=no")
 }
 
 func runParkeeCloud() {
 	logInfo("Connecting ke Parkee Agent Central v2 via Teleport...")
 	fmt.Println()
-	runInteractive("tsh", "ssh", "parkee@parkee-agent-central")
+	runInteractive("tsh", nil, "ssh", "parkee@parkee-agent-central")
 }
 
 func runParkeeLauncher() {
@@ -1043,7 +1043,8 @@ func runLocationLookup() {
 				fmt.Println()
 				runInteractive(
 					"sshpass",
-					"-p", SshPass,
+					[]string{"SSHPASS=" + SshPass},
+					"-e",
 					"ssh",
 					"-o", "StrictHostKeyChecking=no",
 					"-o", "ConnectTimeout=5",
@@ -1161,8 +1162,8 @@ func executeSingleLocationMenu(selected *Location) {
 
 			runInteractive(
 				"sshpass",
-				"-p",
-				SshPass,
+				[]string{"SSHPASS=" + SshPass},
+				"-e",
 				"ssh",
 				"-o",
 				"StrictHostKeyChecking=no",
@@ -1312,10 +1313,7 @@ func fetchLiveVersionsInlineSafe(ip string) (string, string, string) {
 
 	go func() {
 
-		cmd := exec.Command(
-			"sshpass",
-			"-p",
-			SshPass,
+		cmd := sshpassCmd(SshPass,
 			"ssh",
 			"-o",
 			"StrictHostKeyChecking=no",
@@ -1880,11 +1878,23 @@ func runLogCleaner() {
 	logOK("Kembali ke menu utama GASAK.")
 }
 
-func runInteractive(name string, args ...string) {
+// sshpassCmd builds a sshpass invocation using -e instead of -p, so the
+// password rides in the child process's env instead of its argv (visible
+// via `ps aux` otherwise).
+func sshpassCmd(password string, args ...string) *exec.Cmd {
+	cmd := exec.Command("sshpass", append([]string{"-e"}, args...)...)
+	cmd.Env = append(os.Environ(), "SSHPASS="+password)
+	return cmd
+}
+
+func runInteractive(name string, env []string, args ...string) {
 	cmd := exec.Command(name, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	if err := cmd.Run(); err != nil {
 		logWarn(fmt.Sprintf("Command exit: %s (%v)", name, err))
 	}
@@ -2112,7 +2122,7 @@ func listRemoteDir(tpUser *TeleportUser, loc *Location, remoteDir string) ([]str
 		cmd := exec.Command("tsh", "ssh", remoteUserHost, remoteCommand)
 		out, err = cmd.Output()
 	} else {
-		cmd := exec.Command("sshpass", "-p", SshPass,
+		cmd := sshpassCmd(SshPass,
 			"ssh",
 			"-o", "StrictHostKeyChecking=no",
 			"-o", "ConnectTimeout=5",
@@ -2175,7 +2185,7 @@ func scpFile(tpUser *TeleportUser, loc *Location, remotePath string, filename st
 				compressArgs,
 			)
 		} else {
-			compressCmd = exec.Command("sshpass", "-p", SshPass,
+			compressCmd = sshpassCmd(SshPass,
 				"ssh", "-o", "StrictHostKeyChecking=no",
 				fmt.Sprintf("support@%s", loc.IP),
 				compressArgs,
@@ -2205,7 +2215,7 @@ func scpFile(tpUser *TeleportUser, loc *Location, remotePath string, filename st
 		cmd = exec.Command("tsh", "scp", src, destPath)
 	} else {
 		src := fmt.Sprintf("support@%s:%s", loc.IP, remotePath)
-		cmd = exec.Command("sshpass", "-p", SshPass,
+		cmd = sshpassCmd(SshPass,
 			"scp",
 			"-o", "StrictHostKeyChecking=no",
 			"-o", "ConnectTimeout=15",
@@ -2289,8 +2299,7 @@ func queryGatesViaSSH(loc *Location) ([]GateInfo, error) {
 		query,
 	)
 
-	cmd := exec.Command(
-		"sshpass", "-p", SshPass,
+	cmd := sshpassCmd(SshPass,
 		"ssh",
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "ConnectTimeout=5",
@@ -2486,7 +2495,7 @@ func execGateLsCmd(tpUser *TeleportUser, loc *Location, gateUser string, gatePas
 		return cmd.CombinedOutput()
 	}
 
-	cmd := exec.Command("sshpass", "-p", SshPass,
+	cmd := sshpassCmd(SshPass,
 		"ssh",
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "ConnectTimeout=5",
@@ -2611,7 +2620,7 @@ func grepKeywordInGateLogs(tpUser *TeleportUser, loc *Location, gate GateInfo, r
 		)
 		out, err = cmd.Output()
 	} else {
-		cmd := exec.Command("sshpass", "-p", SshPass,
+		cmd := sshpassCmd(SshPass,
 			"ssh",
 			"-o", "StrictHostKeyChecking=no",
 			"-o", "ConnectTimeout=5",
@@ -2824,7 +2833,7 @@ func scpGateFileViaServerPos(tpUser *TeleportUser, loc *Location, gate GateInfo,
 				compressAndHop,
 			)
 		} else {
-			compressHopCmd = exec.Command("sshpass", "-p", SshPass,
+			compressHopCmd = sshpassCmd(SshPass,
 				"ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10",
 				fmt.Sprintf("support@%s", loc.IP),
 				compressAndHop,
@@ -2851,7 +2860,7 @@ func scpGateFileViaServerPos(tpUser *TeleportUser, loc *Location, gate GateInfo,
 				nodeName := nodeNameFromUnicode(loc.Unicode)
 				exec.Command("tsh", "ssh", fmt.Sprintf("%s@%s", nodeName, nodeName), cleanGzGate).Run()
 			} else {
-				exec.Command("sshpass", "-p", SshPass, "ssh", "-o", "StrictHostKeyChecking=no",
+				sshpassCmd(SshPass, "ssh", "-o", "StrictHostKeyChecking=no",
 					fmt.Sprintf("support@%s", loc.IP), cleanGzGate).Run()
 			}
 
@@ -2876,7 +2885,7 @@ func scpGateFileViaServerPos(tpUser *TeleportUser, loc *Location, gate GateInfo,
 			cmd.Stderr = os.Stderr
 			hop1Err = cmd.Run()
 		} else {
-			cmd := exec.Command("sshpass", "-p", SshPass,
+			cmd := sshpassCmd(SshPass,
 				"ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10",
 				fmt.Sprintf("support@%s", loc.IP),
 				hop1Cmd,
@@ -2907,7 +2916,7 @@ hop2:
 		hop2Cmd = exec.Command("tsh", "scp", src, destPath)
 	} else {
 		src := fmt.Sprintf("support@%s:%s", loc.IP, tmpPath)
-		hop2Cmd = exec.Command("sshpass", "-p", SshPass,
+		hop2Cmd = sshpassCmd(SshPass,
 			"scp",
 			"-o", "StrictHostKeyChecking=no",
 			"-o", "ConnectTimeout=15",
@@ -2930,7 +2939,7 @@ hop2:
 		nodeName := nodeNameFromUnicode(loc.Unicode)
 		exec.Command("tsh", "ssh", fmt.Sprintf("%s@%s", nodeName, nodeName), cleanupCmd).Run()
 	} else {
-		exec.Command("sshpass", "-p", SshPass,
+		sshpassCmd(SshPass,
 			"ssh", "-o", "StrictHostKeyChecking=no",
 			fmt.Sprintf("support@%s", loc.IP),
 			cleanupCmd,
@@ -3160,22 +3169,26 @@ func runUpdateReader() {
 
 			gateUser := strings.ToLower(selectedGate.UserPC)
 			gatePass := fmt.Sprintf("pc%sclient", strings.ToLower(selectedLoc.Unicode))
-			proxyCmd := fmt.Sprintf("sshpass -p %s ssh -o StrictHostKeyChecking=no -W %%h:%%p support@%s", SshPass, selectedLoc.IP)
+			// SSHPASS_LOC is only ever referenced by name inside proxyCmd (never
+			// interpolated), so the loc-server password never lands in argv even
+			// when ProxyCommand spawns its own sshpass subprocess.
+			proxyCmd := fmt.Sprintf(`SSHPASS="$SSHPASS_LOC" sshpass -e ssh -o StrictHostKeyChecking=no -W %%h:%%p support@%s`, selectedLoc.IP)
 			isZT := strings.HasPrefix(selectedGate.IP, "10.70.")
 
 			logInfo("Uploading update_reader.sh ke gate...")
 			var scpCmd *exec.Cmd
 			if isZT {
-				scpCmd = exec.Command("sshpass", "-p", gatePass,
+				scpCmd = sshpassCmd(gatePass,
 					"scp", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=30",
 					scriptPath, fmt.Sprintf("%s@%s:~/update_reader.sh", gateUser, selectedGate.IP),
 				)
 			} else {
-				scpCmd = exec.Command("sshpass", "-p", gatePass,
+				scpCmd = sshpassCmd(gatePass,
 					"scp", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=30",
 					"-o", fmt.Sprintf("ProxyCommand=%s", proxyCmd),
 					scriptPath, fmt.Sprintf("%s@%s:~/update_reader.sh", gateUser, selectedGate.IP),
 				)
+				scpCmd.Env = append(scpCmd.Env, "SSHPASS_LOC="+SshPass)
 			}
 			scpCmd.Stdout = os.Stdout
 			scpCmd.Stderr = os.Stderr
@@ -3196,18 +3209,19 @@ func runUpdateReader() {
 
 			var sshCmd *exec.Cmd
 			if isZT {
-				sshCmd = exec.Command("sshpass", "-p", gatePass,
+				sshCmd = sshpassCmd(gatePass,
 					"ssh", "-t", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=30",
 					fmt.Sprintf("%s@%s", gateUser, selectedGate.IP),
 					remoteCmd,
 				)
 			} else {
-				sshCmd = exec.Command("sshpass", "-p", gatePass,
+				sshCmd = sshpassCmd(gatePass,
 					"ssh", "-t", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=30",
 					"-o", fmt.Sprintf("ProxyCommand=%s", proxyCmd),
 					fmt.Sprintf("%s@%s", gateUser, selectedGate.IP),
 					remoteCmd,
 				)
+				sshCmd.Env = append(sshCmd.Env, "SSHPASS_LOC="+SshPass)
 			}
 
 			sshCmd.Stdout = os.Stdout
