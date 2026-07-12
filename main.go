@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -2097,7 +2099,7 @@ func fetchSingleFile(tpUser *TeleportUser, loc *Location, remotePath string, log
 }
 
 func listRemoteDir(tpUser *TeleportUser, loc *Location, remoteDir string) ([]string, error) {
-	lsCmd := fmt.Sprintf("cd %s && ls -lhtr 2>/dev/null | tail -50", remoteDir)
+	lsCmd := fmt.Sprintf("ls -lht %s 2>&1 | grep -v ^total | head -200", remoteDir)
 
 	var out []byte
 	var err error
@@ -2362,43 +2364,202 @@ func parseGateOutput(output string) ([]GateInfo, error) {
 	return gates, nil
 }
 
+func fetchGateUserOverride(gateIP string) (string, bool) {
+	client := &http.Client{Timeout: 8 * time.Second}
+	req, err := http.NewRequest("GET",
+		fmt.Sprintf(VaultServerURL+"/api/gate-override?ip=%s", gateIP),
+		nil,
+	)
+	if err != nil {
+		return "", false
+	}
+	req.Header.Set("X-Gasak-Token", GasakDistToken)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", false
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return "", false
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", false
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", false
+	}
+
+	var payload struct {
+		Username string `json:"username"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil || payload.Username == "" {
+		return "", false
+	}
+	return payload.Username, true
+}
+
+func saveGateUserOverrideRemote(gateIP string, username string) error {
+	client := &http.Client{Timeout: 8 * time.Second}
+	payload, err := json.Marshal(map[string]string{
+		"ip":       gateIP,
+		"username": username,
+	})
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("POST",
+		VaultServerURL+"/api/gate-override",
+		bytes.NewReader(payload),
+	)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Gasak-Token", GasakDistToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("vault error (%d): %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+func isMissingSSHPass(output string) bool {
+	return strings.Contains(output, "command not found: sshpass") ||
+		strings.Contains(output, "sshpass: not found") ||
+		strings.Contains(output, "sshpass: command not found")
+}
+
+var (
+	ErrGateInfraIssue = errors.New("gate infra issue")
+	ErrGateAuthIssue  = errors.New("gate auth issue")
+)
+
+func classifyGateError(loc *Location, err error, output string) error {
+	if isMissingSSHPass(output) {
+		return fmt.Errorf(
+			"%w: sshpass belom keinstall di node %s bre, bukan gate-nya yang mati — infra node-nya aja yang belom siap. Pake Teleport Web UI dulu ya, infra-nya di-notif buat install sshpass",
+			ErrGateInfraIssue, strings.ToUpper(loc.Unicode),
+		)
+	}
+	if isSSHAuthFailure(err, output) {
+		return fmt.Errorf(
+			"%w: nama gate di lokasi ini emang random parah, udah dicoba beberapa pola tapi auth tetep ditolak. SSH manual dulu ke gate-nya buat cek username yang bener, atau pake Teleport Web UI",
+			ErrGateAuthIssue,
+		)
+	}
+	return fmt.Errorf("gagal konek ke gate: %w (output: %s)", err, output)
+}
+
+func isSSHAuthFailure(err error, output string) bool {
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		if exitErr.ExitCode() == 5 {
+			return true
+		}
+	}
+	return strings.Contains(output, "Permission denied")
+}
+
+func execGateLsCmd(tpUser *TeleportUser, loc *Location, gateUser string, gatePass string, gate GateInfo, remotePath string) ([]byte, error) {
+	lsCmd := fmt.Sprintf(
+		"sshpass -p '%s' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 %s@%s \"ls -lht %s 2>&1 | grep -v ^total | head -30\"",
+		gatePass, gateUser, gate.IP, remotePath,
+	)
+
+	if tpUser.IsL2 {
+		nodeName := nodeNameFromUnicode(loc.Unicode)
+		cmd := exec.Command("tsh", "ssh",
+			fmt.Sprintf("%s@%s", nodeName, nodeName),
+			lsCmd,
+		)
+		return cmd.CombinedOutput()
+	}
+
+	cmd := exec.Command("sshpass", "-p", SshPass,
+		"ssh",
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "ConnectTimeout=5",
+		fmt.Sprintf("support@%s", loc.IP),
+		lsCmd,
+	)
+	return cmd.CombinedOutput()
+}
+
 func listGateLogFiles(tpUser *TeleportUser, loc *Location, gate GateInfo, remotePath string) ([]string, error) {
 	gatePass := fmt.Sprintf("pc%sclient", strings.ToLower(loc.Unicode))
-	gateUser := resolveGateUsername(gate.UserPC, loc.Unicode)
+	rawUser := strings.ToLower(gate.UserPC)
 
 	var out []byte
 	var err error
+	found := false
 
-	if tpUser.IsL2 {
-		lsCmd := fmt.Sprintf(
-			"sshpass -p '%s' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 %s@%s 'ls -lhtr %s 2>/dev/null | tail -30'",
-			gatePass, gateUser, gate.IP, remotePath,
-		)
-		cmd := exec.Command("sshpass", "-p", SshPass,
-			"ssh",
-			"-o", "StrictHostKeyChecking=no",
-			"-o", "ConnectTimeout=5",
-			fmt.Sprintf("GasakSshSupeng"),
-			lsCmd,
-		)
-		out, err = cmd.Output()
-	} else {
-		lsCmd := fmt.Sprintf(
-			"sshpass -p '%s' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 %s@%s 'ls -lhtr %s 2>/dev/null | tail -30'",
-			gatePass, gateUser, gate.IP, remotePath,
-		)
-		cmd := exec.Command("sshpass", "-p", SshPass,
-			"ssh",
-			"-o", "StrictHostKeyChecking=no",
-			"-o", "ConnectTimeout=5",
-			fmt.Sprintf("support@%s", loc.IP),
-			lsCmd,
-		)
-		out, err = cmd.Output()
+	if overrideUser, ok := fetchGateUserOverride(gate.IP); ok {
+		out, err = execGateLsCmd(tpUser, loc, overrideUser, gatePass, gate, remotePath)
+		if err == nil {
+			found = true
+		} else if isMissingSSHPass(string(out)) {
+			return nil, classifyGateError(loc, err, string(out))
+		}
 	}
 
-	if err != nil {
-		return nil, fmt.Errorf("gagal list file di gate: %w", err)
+	if !found {
+		out, err = execGateLsCmd(tpUser, loc, rawUser, gatePass, gate, remotePath)
+		if err == nil {
+			found = true
+		} else if isMissingSSHPass(string(out)) {
+			return nil, classifyGateError(loc, err, string(out))
+		}
+	}
+
+	if !found && isSSHAuthFailure(err, string(out)) {
+		strippedUser := resolveGateUsername(gate.UserPC, loc.Unicode)
+		if strippedUser != rawUser {
+			logWarn(fmt.Sprintf("Auth gagal pake username '%s', nyoba fallback ke '%s'...", rawUser, strippedUser))
+			out, err = execGateLsCmd(tpUser, loc, strippedUser, gatePass, gate, remotePath)
+			if err == nil {
+				found = true
+			}
+		}
+	}
+
+	if !found && isSSHAuthFailure(err, string(out)) {
+		logWarn(fmt.Sprintf("Username '%s' dan versi stripped-nya dua-duanya gagal auth ke %s.", rawUser, gate.IP))
+		var manualUser string
+		manualForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title(fmt.Sprintf("Ketik username SSH gate yang bener buat %s [%s] (kosongin buat skip):", gate.UserPC, gate.IP)).
+					Value(&manualUser),
+			),
+		).WithTheme(crushTheme())
+
+		if formErr := manualForm.Run(); formErr == nil && strings.TrimSpace(manualUser) != "" {
+			manualUser = strings.TrimSpace(manualUser)
+			out, err = execGateLsCmd(tpUser, loc, manualUser, gatePass, gate, remotePath)
+			if err == nil {
+				found = true
+				if saveErr := saveGateUserOverrideRemote(gate.IP, manualUser); saveErr != nil {
+					logWarn("Username jalan tapi gagal nyimpen override ke vault: " + saveErr.Error())
+				} else {
+					logOK(fmt.Sprintf("Mantap, username '%s' jalan! Udah disimpen di vault, tim lain ga perlu nemu ulang.", manualUser))
+				}
+			}
+		}
+	}
+
+	if !found {
+		return nil, classifyGateError(loc, err, string(out))
 	}
 
 	raw := strings.TrimSpace(string(out))
@@ -2526,7 +2687,14 @@ func fetchAgentGateLog(tpUser *TeleportUser, loc *Location, remotePath string, l
 		files, err := listGateLogFiles(tpUser, loc, selectedGate, remotePath)
 		if err != nil {
 			logErr("Gagal list file di gate: " + err.Error())
-			logWarn("Cek: gate PC nyala ga?")
+			switch {
+			case errors.Is(err, ErrGateInfraIssue):
+				logWarn("Ini infra node kok, bukan gate yang mati. help pake Teleport Web UI dulu buat sementara ya men")
+			case errors.Is(err, ErrGateAuthIssue):
+				logWarn("Kemungkinan password gate berubah, atau emang exception dari pola pc{unicode}client.")
+			default:
+				logWarn("Cek: gate PC nyala ga men")
+			}
 			fmt.Println()
 			fmt.Println(dimStyle.Render("  [enter] balik ke pilih gate..."))
 			fmt.Scanln()
@@ -2581,7 +2749,7 @@ func fetchAgentGateLog(tpUser *TeleportUser, loc *Location, remotePath string, l
 
 		fileOpts := make([]huh.Option[string], 0, len(filteredFiles)+1)
 		fileOpts = append(fileOpts, huh.NewOption("← Balik ke Pilih Gate", "back"))
-		for _, f := range files {
+		for _, f := range filteredFiles {
 			fileOpts = append(fileOpts, huh.NewOption(f, f))
 		}
 
