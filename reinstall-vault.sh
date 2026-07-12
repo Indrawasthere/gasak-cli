@@ -1,8 +1,8 @@
 #!/bin/bash
 
-SERVER_IP="10.70.0.110"
+SERVER_IP="${GASAK_DIST_URL:-10.70.0.110}"
 VAULT_PORT="9002"
-GASAK_DIST_TOKEN="gsk_dist_9f2k7x"
+GASAK_DIST_TOKEN="${GASAK_DIST_TOKEN}"
 VAULT_URL="http://${SERVER_IP}:${VAULT_PORT}"
 
 REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "$USER")}"
